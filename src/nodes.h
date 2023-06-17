@@ -1,4 +1,5 @@
 // Copyright 2007-2022 David Robillard <d@drobilla.net>
+// Copyright 2023 Nedko Arnaudov
 // SPDX-License-Identifier: ISC
 
 #ifndef JALV_NODES_H
@@ -17,6 +18,7 @@ typedef struct {
   LilvNode* atom_Path;
   LilvNode* atom_Sequence;
   LilvNode* lv2_AudioPort;
+  LilvNode* lv2_OldMidiPort;
   LilvNode* lv2_CVPort;
   LilvNode* lv2_ControlPort;
   LilvNode* lv2_InputPort;

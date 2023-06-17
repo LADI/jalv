@@ -1,4 +1,5 @@
 // Copyright 2007-2022 David Robillard <d@drobilla.net>
+// Copyright 2023 Nedko Arnaudov
 // SPDX-License-Identifier: ISC
 
 #include "backend.h"
@@ -68,6 +69,8 @@
 
 #define NS_RDF "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 #define NS_XSD "http://www.w3.org/2001/XMLSchema#"
+
+#define LLEXT__MidiPort "http://ll-plugins.nongnu.org/lv2/ext/MidiPort"
 
 #ifndef MIN
 #  define MIN(a, b) (((a) < (b)) ? (a) : (b))
@@ -215,6 +218,9 @@ create_port(Jalv* jalv, uint32_t port_index, float default_value)
   } else if (lilv_port_is_a(
                jalv->plugin, port->lilv_port, jalv->nodes.atom_AtomPort)) {
     port->type = TYPE_EVENT;
+  } else if (lilv_port_is_a(
+               jalv->plugin, port->lilv_port, jalv->nodes.lv2_OldMidiPort)) {
+    port->type = TYPE_MIDI;
   } else if (!optional) {
     die("Mandatory port has unknown data type");
   }
@@ -937,6 +943,7 @@ jalv_init_nodes(LilvWorld* const world, JalvNodes* const nodes)
   nodes->atom_Path              = MAP_NODE(LV2_ATOM__Path);
   nodes->atom_Sequence          = MAP_NODE(LV2_ATOM__Sequence);
   nodes->lv2_AudioPort          = MAP_NODE(LV2_CORE__AudioPort);
+  nodes->lv2_OldMidiPort        = MAP_NODE(LLEXT__MidiPort);
   nodes->lv2_CVPort             = MAP_NODE(LV2_CORE__CVPort);
   nodes->lv2_ControlPort        = MAP_NODE(LV2_CORE__ControlPort);
   nodes->lv2_InputPort          = MAP_NODE(LV2_CORE__InputPort);
