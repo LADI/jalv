@@ -200,7 +200,9 @@ jalv_frontend_init(int* argc, char*** argv, JalvOptions* opts)
 const char*
 jalv_frontend_ui_type(void)
 {
-#if GTK_MAJOR_VERSION == 3
+#if GTK_MAJOR_VERSION == 2
+  return "http://lv2plug.in/ns/extensions/ui#GtkUI";
+#elif GTK_MAJOR_VERSION == 3
   return "http://lv2plug.in/ns/extensions/ui#Gtk3UI";
 #else
   return NULL;
@@ -1299,21 +1301,29 @@ jalv_frontend_discover(Jalv* ZIX_UNUSED(jalv))
 float
 jalv_frontend_refresh_rate(Jalv* ZIX_UNUSED(jalv))
 {
+#if GTK_MAJOR_VERSION == 2
+  return 30.0f;
+#else
   GdkDisplay* const display = gdk_display_get_default();
   GdkMonitor* const monitor = gdk_display_get_primary_monitor(display);
 
   const float rate = (float)gdk_monitor_get_refresh_rate(monitor);
 
   return rate < 30.0f ? 30.0f : rate;
+#endif
 }
 
 float
 jalv_frontend_scale_factor(Jalv* ZIX_UNUSED(jalv))
 {
+#if GTK_MAJOR_VERSION == 2
+  return 1.0f;
+#else
   GdkDisplay* const display = gdk_display_get_default();
   GdkMonitor* const monitor = gdk_display_get_primary_monitor(display);
 
   return (float)gdk_monitor_get_scale_factor(monitor);
+#endif
 }
 
 static void

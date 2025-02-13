@@ -3,6 +3,10 @@
 
 install_man('jalv.1')
 
+if not get_option('gtk2').disabled()
+  install_man('jalv.gtk.1')
+endif
+
 if not get_option('gtk3').disabled()
   install_man('jalv.gtk3.1')
 endif
