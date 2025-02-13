@@ -112,7 +112,7 @@ jalv_frontend_init(JalvFrontendArgs* const args, JalvOptions* const opts)
      "Load state from save directory",
      "DIR"},
     {"preset",
-     'p',
+     'P',
      0,
      G_OPTION_ARG_STRING,
      &opts->preset,
