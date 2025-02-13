@@ -7,7 +7,7 @@ if not get_option('man').disabled()
   install_man(files('jalv.1'))
 
   if not get_option('gtk2').disabled()
-    install_man(files('jalv.gtk.1'))
+    install_man(files('jalv.gtk2.1'))
   endif
 
   if not get_option('gtk3').disabled()
