@@ -5,16 +5,20 @@
 #define JALV_URIDS_H
 
 #include "attributes.h"
+#include "mapper.h"
 
-#include "lv2/urid/urid.h"
+#include <lv2/urid/urid.h>
 
+// Cached LV2 URIDs
 JALV_BEGIN_DECLS
 
 typedef struct {
+  LV2_URID atom_Chunk;
   LV2_URID atom_Float;
   LV2_URID atom_Int;
   LV2_URID atom_Object;
   LV2_URID atom_Path;
+  LV2_URID atom_Sequence;
   LV2_URID atom_String;
   LV2_URID atom_eventTransfer;
   LV2_URID bufsz_maxBlockLength;
@@ -42,6 +46,9 @@ typedef struct {
   LV2_URID ui_scaleFactor;
   LV2_URID ui_updateRate;
 } JalvURIDs;
+
+void
+jalv_init_urids(JalvMapper* mapper, JalvURIDs* urids);
 
 JALV_END_DECLS
 

@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+// Program options
 JALV_BEGIN_DECLS
 
 typedef struct {
@@ -16,7 +17,7 @@ typedef struct {
   char*    load;            ///< Path for state to load
   char*    preset;          ///< URI of preset to load
   char**   controls;        ///< Control values
-  uint32_t buffer_size;     ///< Plugin <=> UI communication buffer size
+  uint32_t ring_size;       ///< Plugin <=> UI communication buffer size
   double   update_rate;     ///< UI update rate in Hz
   double   scale_factor;    ///< UI scale factor
   int      dump;            ///< Dump communication iff true

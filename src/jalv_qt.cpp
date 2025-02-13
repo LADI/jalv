@@ -2,15 +2,19 @@
 // SPDX-License-Identifier: ISC
 
 #include "jalv_qt.hpp"
+#include "comm.h"
 #include "frontend.h"
-#include "jalv_internal.h"
+#include "jalv.h"
 #include "nodes.h"
 #include "options.h"
 #include "port.h"
+#include "query.h"
+#include "state.h"
+#include "types.h"
 
-#include "lilv/lilv.h"
-#include "suil/suil.h"
-#include "zix/sem.h"
+#include <lilv/lilv.h>
+#include <suil/suil.h>
+#include <zix/sem.h>
 
 #include <QAction>
 #include <QApplication>
@@ -25,6 +29,7 @@
 #include <QLayoutItem>
 #include <QList>
 #include <QMainWindow>
+#include <QMargins>
 #include <QMenu>
 #include <QMenuBar>
 #include <QObject>
@@ -40,6 +45,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QtCore>
+#include <QtGlobal>
 
 #include <algorithm>
 #include <cmath>
@@ -51,13 +57,13 @@
 constexpr int CONTROL_WIDTH = 150;
 constexpr int DIAL_STEPS    = 10000;
 
-static QApplication* app = nullptr;
+namespace {
+
+QApplication* app = nullptr;
 
 class FlowLayout final : public QLayout
 {
 public:
-  explicit FlowLayout(QWidget* parent, int margin, int hSpacing, int vSpacing);
-
   explicit FlowLayout(int margin, int hSpacing, int vSpacing);
 
   FlowLayout(const FlowLayout&)            = delete;
@@ -85,22 +91,14 @@ private:
   int doLayout(const QRect& rect, bool testOnly) const;
   int smartSpacing(QStyle::PixelMetric pm) const;
 
-  QList<QLayoutItem*> itemList;
-  int                 m_hSpace;
-  int                 m_vSpace;
+  QList<QLayoutItem*> _itemList;
+  int                 _hSpace;
+  int                 _vSpace;
 };
 
-FlowLayout::FlowLayout(QWidget* parent, int margin, int hSpacing, int vSpacing)
-  : QLayout(parent)
-  , m_hSpace(hSpacing)
-  , m_vSpace(vSpacing)
-{
-  setContentsMargins(margin, margin, margin, margin);
-}
-
 FlowLayout::FlowLayout(int margin, int hSpacing, int vSpacing)
-  : m_hSpace(hSpacing)
-  , m_vSpace(vSpacing)
+  : _hSpace(hSpacing)
+  , _vSpace(vSpacing)
 {
   setContentsMargins(margin, margin, margin, margin);
 }
@@ -116,14 +114,14 @@ FlowLayout::~FlowLayout()
 void
 FlowLayout::addItem(QLayoutItem* item)
 {
-  itemList.append(item);
+  _itemList.append(item);
 }
 
 int
 FlowLayout::horizontalSpacing() const
 {
-  if (m_hSpace >= 0) {
-    return m_hSpace;
+  if (_hSpace >= 0) {
+    return _hSpace;
   }
 
   return smartSpacing(QStyle::PM_LayoutHorizontalSpacing);
@@ -132,8 +130,8 @@ FlowLayout::horizontalSpacing() const
 int
 FlowLayout::verticalSpacing() const
 {
-  if (m_vSpace >= 0) {
-    return m_vSpace;
+  if (_vSpace >= 0) {
+    return _vSpace;
   }
 
   return smartSpacing(QStyle::PM_LayoutVerticalSpacing);
@@ -142,20 +140,20 @@ FlowLayout::verticalSpacing() const
 int
 FlowLayout::count() const
 {
-  return itemList.size();
+  return _itemList.size();
 }
 
 QLayoutItem*
 FlowLayout::itemAt(int index) const
 {
-  return itemList.value(index);
+  return _itemList.value(index);
 }
 
 QLayoutItem*
 FlowLayout::takeAt(int index)
 {
-  if (index >= 0 && index < itemList.size()) {
-    return itemList.takeAt(index);
+  if (index >= 0 && index < _itemList.size()) {
+    return _itemList.takeAt(index);
   }
 
   return nullptr;
@@ -195,13 +193,13 @@ FlowLayout::sizeHint() const
 QSize
 FlowLayout::minimumSize() const
 {
-  QSize        size = {};
-  QLayoutItem* item = nullptr;
-  foreach (item, itemList) {
+  QSize size = {};
+  for (QLayoutItem* const item : _itemList) {
     size = size.expandedTo(item->minimumSize());
   }
 
-  return size + QSize(2 * margin(), 2 * margin());
+  const auto m = contentsMargins();
+  return size + QSize{m.left() + m.right(), m.top() + m.bottom()};
 }
 
 int
@@ -218,8 +216,7 @@ FlowLayout::doLayout(const QRect& rect, bool testOnly) const
   int         y             = effectiveRect.y();
   int         lineHeight    = 0;
 
-  QLayoutItem* item = nullptr;
-  foreach (item, itemList) {
+  for (QLayoutItem* const item : _itemList) {
     QWidget* wid = item->widget();
 
     int spaceX = horizontalSpacing();
@@ -260,52 +257,22 @@ FlowLayout::doLayout(const QRect& rect, bool testOnly) const
 int
 FlowLayout::smartSpacing(QStyle::PixelMetric pm) const
 {
-  QObject* parent = this->parent();
+  QObject* const parent = this->parent();
   if (!parent) {
     return -1;
   }
 
-  if (parent->isWidgetType()) {
-    auto* const pw = static_cast<QWidget*>(parent);
-    return pw->style()->pixelMetric(pm, nullptr, pw);
+  auto* const parentWidget = qobject_cast<QWidget*>(parent);
+  if (parentWidget) {
+    return parentWidget->style()->pixelMetric(pm, nullptr, parentWidget);
   }
 
-  return static_cast<QLayout*>(parent)->spacing();
-}
-
-extern "C" {
-
-int
-jalv_frontend_init(int* argc, char*** argv, JalvOptions*)
-{
-  app = new QApplication(*argc, *argv, true);
-  app->setStyleSheet("QGroupBox::title { subcontrol-position: top center }");
-
-  return 0;
-}
-
-const char*
-jalv_frontend_ui_type(void)
-{
-  return "http://lv2plug.in/ns/extensions/ui#Qt5UI";
-}
-
-void
-jalv_ui_port_event(Jalv*       jalv,
-                   uint32_t    port_index,
-                   uint32_t    buffer_size,
-                   uint32_t    protocol,
-                   const void* buffer)
-{
-  if (jalv->ui_instance) {
-    suil_instance_port_event(
-      jalv->ui_instance, port_index, buffer_size, protocol, buffer);
-  } else {
-    auto* const control = static_cast<Control*>(jalv->ports[port_index].widget);
-    if (control) {
-      control->setValue(*static_cast<const float*>(buffer));
-    }
+  auto* const parentLayout = qobject_cast<QLayout*>(parent);
+  if (parentLayout) {
+    return parentLayout->spacing();
   }
+
+  return -1;
 }
 
 class Timer : public QTimer
@@ -321,7 +288,7 @@ private:
   Jalv* _jalv;
 };
 
-static int
+int
 add_preset_to_menu(Jalv*           jalv,
                    const LilvNode* node,
                    const LilvNode* title,
@@ -336,15 +303,18 @@ add_preset_to_menu(Jalv*           jalv,
   return 0;
 }
 
+} // namespace
+
 Control::Control(PortContainer portContainer, QWidget* parent)
   : QGroupBox(parent)
-  , dial(new QDial())
-  , plugin(portContainer.jalv->plugin)
-  , port(portContainer.port)
-  , label(new QLabel())
+  , _dial(new QDial())
+  , _jalv(portContainer.jalv)
+  , _port(portContainer.port)
+  , _label(new QLabel())
 {
-  JalvNodes*      nodes    = &portContainer.jalv->nodes;
-  const LilvPort* lilvPort = port->lilv_port;
+  const JalvNodes*  nodes    = &portContainer.jalv->nodes;
+  const LilvPlugin* plugin   = portContainer.jalv->plugin;
+  const LilvPort*   lilvPort = _port->lilv_port;
 
   LilvNode* nmin = nullptr;
   LilvNode* nmax = nullptr;
@@ -354,9 +324,9 @@ Control::Control(PortContainer portContainer, QWidget* parent)
   LilvNode* stepsNode =
     lilv_port_get(plugin, lilvPort, nodes->pprops_rangeSteps);
   if (lilv_node_is_int(stepsNode)) {
-    steps = std::max(lilv_node_as_int(stepsNode), 2);
+    _steps = std::max(lilv_node_as_int(stepsNode), 2);
   } else {
-    steps = DIAL_STEPS;
+    _steps = DIAL_STEPS;
   }
   lilv_node_free(stepsNode);
 
@@ -371,52 +341,54 @@ Control::Control(PortContainer portContainer, QWidget* parent)
       }
 
       const float f = lilv_node_as_float(val);
-      scalePoints.push_back(f);
-      scaleMap[f] = lilv_node_as_string(lilv_scale_point_get_label(p));
+      _scalePoints.push_back(f);
+      _scaleMap[f] = lilv_node_as_string(lilv_scale_point_get_label(p));
     }
 
     lilv_scale_points_free(sp);
   }
 
   // Check port properties
-  isLogarithmic =
+  _isLogarithmic =
     lilv_port_has_property(plugin, lilvPort, nodes->pprops_logarithmic);
-  isInteger = lilv_port_has_property(plugin, lilvPort, nodes->lv2_integer);
-  isEnum    = lilv_port_has_property(plugin, lilvPort, nodes->lv2_enumeration);
+  _isInteger = lilv_port_has_property(plugin, lilvPort, nodes->lv2_integer);
+  _isEnum    = lilv_port_has_property(plugin, lilvPort, nodes->lv2_enumeration);
 
   if (lilv_port_has_property(plugin, lilvPort, nodes->lv2_toggled)) {
-    isInteger = true;
+    _isInteger = true;
 
-    if (!scaleMap[0]) {
-      scaleMap[0] = "Off";
+    if (!_scaleMap[0]) {
+      _scaleMap[0] = "Off";
     }
-    if (!scaleMap[1]) {
-      scaleMap[1] = "On";
+    if (!_scaleMap[1]) {
+      _scaleMap[1] = "On";
     }
   }
 
   // Find and set min, max and default values for port
-  const float defaultValue = ndef ? lilv_node_as_float(ndef) : port->control;
+  const float defaultValue =
+    ndef ? lilv_node_as_float(ndef)
+         : portContainer.jalv->process.controls_buf[_port->index];
   setRange(lilv_node_as_float(nmin), lilv_node_as_float(nmax));
   setValue(defaultValue);
 
   // Fill layout
   auto* const layout = new QVBoxLayout();
-  layout->addWidget(label, 0, Qt::AlignHCenter);
-  layout->addWidget(dial, 0, Qt::AlignHCenter);
+  layout->addWidget(_label, 0, Qt::AlignHCenter);
+  layout->addWidget(_dial, 0, Qt::AlignHCenter);
   setLayout(layout);
 
   setMinimumWidth(CONTROL_WIDTH);
   setMaximumWidth(CONTROL_WIDTH);
 
   LilvNode* nname = lilv_port_get_name(plugin, lilvPort);
-  name            = QString("%1").arg(lilv_node_as_string(nname));
+  _name           = QString("%1").arg(lilv_node_as_string(nname));
 
   // Handle long names
-  if (stringWidth(name) > CONTROL_WIDTH) {
-    setTitle(fontMetrics().elidedText(name, Qt::ElideRight, CONTROL_WIDTH));
+  if (stringWidth(_name) > CONTROL_WIDTH) {
+    setTitle(fontMetrics().elidedText(_name, Qt::ElideRight, CONTROL_WIDTH));
   } else {
-    setTitle(name);
+    setTitle(_name);
   }
 
   // Set tooltip if comment is available
@@ -429,7 +401,7 @@ Control::Control(PortContainer portContainer, QWidget* parent)
 
   setFlat(true);
 
-  connect(dial, SIGNAL(valueChanged(int)), this, SLOT(dialChanged(int)));
+  connect(_dial, SIGNAL(valueChanged(int)), this, SLOT(dialChanged(int)));
 
   lilv_node_free(nmin);
   lilv_node_free(nmax);
@@ -443,31 +415,31 @@ Control::setValue(float value)
 {
   float step = 0.0f;
 
-  if (isInteger) {
+  if (_isInteger) {
     step = value;
-  } else if (isEnum) {
-    step = (std::find(scalePoints.begin(), scalePoints.end(), value) -
-            scalePoints.begin());
-  } else if (isLogarithmic) {
-    step = steps * logf(value / min) / logf(max / min);
+  } else if (_isEnum) {
+    step = (std::find(_scalePoints.begin(), _scalePoints.end(), value) -
+            _scalePoints.begin());
+  } else if (_isLogarithmic) {
+    step = _steps * logf(value / _min) / logf(_max / _min);
   } else {
-    step = value * steps;
+    step = value * _steps;
   }
 
-  dial->setValue(step);
-  label->setText(getValueLabel(value));
+  _dial->setValue(step);
+  _label->setText(getValueLabel(value));
 }
 
 QString
 Control::getValueLabel(float value)
 {
-  if (scaleMap[value]) {
-    if (stringWidth(scaleMap[value]) > CONTROL_WIDTH) {
-      label->setToolTip(scaleMap[value]);
+  if (_scaleMap[value]) {
+    if (stringWidth(_scaleMap[value]) > CONTROL_WIDTH) {
+      _label->setToolTip(_scaleMap[value]);
       return fontMetrics().elidedText(
-        QString(scaleMap[value]), Qt::ElideRight, CONTROL_WIDTH);
+        QString(_scaleMap[value]), Qt::ElideRight, CONTROL_WIDTH);
     }
-    return scaleMap[value];
+    return _scaleMap[value];
   }
 
   return QString("%1").arg(value);
@@ -476,40 +448,40 @@ Control::getValueLabel(float value)
 void
 Control::setRange(float minRange, float maxRange)
 {
-  min = minRange;
-  max = maxRange;
+  _min = minRange;
+  _max = maxRange;
 
-  if (isLogarithmic) {
+  if (_isLogarithmic) {
     minRange = 1;
-    maxRange = steps;
-  } else if (isEnum) {
+    maxRange = _steps;
+  } else if (_isEnum) {
     minRange = 0;
-    maxRange = scalePoints.size() - 1;
-  } else if (!isInteger) {
-    minRange *= steps;
-    maxRange *= steps;
+    maxRange = _scalePoints.size() - 1;
+  } else if (!_isInteger) {
+    minRange *= _steps;
+    maxRange *= _steps;
   }
 
-  dial->setRange(minRange, maxRange);
+  _dial->setRange(minRange, maxRange);
 }
 
 float
 Control::getValue()
 {
-  if (isEnum) {
-    return scalePoints[dial->value()];
+  if (_isEnum) {
+    return _scalePoints[_dial->value()];
   }
 
-  if (isInteger) {
-    return dial->value();
+  if (_isInteger) {
+    return _dial->value();
   }
 
-  if (isLogarithmic) {
-    return min *
-           powf(max / min, static_cast<float>(dial->value()) / (steps - 1));
+  if (_isLogarithmic) {
+    return _min *
+           powf(_max / _min, static_cast<float>(_dial->value()) / (_steps - 1));
   }
 
-  return static_cast<float>(dial->value()) / steps;
+  return static_cast<float>(_dial->value()) / _steps;
 }
 
 int
@@ -527,14 +499,16 @@ Control::dialChanged(int)
 {
   const float value = getValue();
 
-  label->setText(getValueLabel(value));
-  port->control = value;
+  _label->setText(getValueLabel(value));
+  jalv_write_control(_jalv->process.ui_to_plugin, _port->index, value);
 }
 
-static bool
+namespace {
+
+bool
 portGroupLessThan(const PortContainer& p1, const PortContainer& p2)
 {
-  Jalv*           jalv  = p1.jalv;
+  const Jalv*     jalv  = p1.jalv;
   const LilvPort* port1 = p1.port->lilv_port;
   const LilvPort* port2 = p2.port->lilv_port;
 
@@ -543,7 +517,8 @@ portGroupLessThan(const PortContainer& p1, const PortContainer& p2)
 
   const int cmp = (group1 && group2) ? strcmp(lilv_node_as_string(group1),
                                               lilv_node_as_string(group2))
-                                     : (intptr_t(group1) - intptr_t(group2));
+                                     : (reinterpret_cast<intptr_t>(group1) -
+                                        reinterpret_cast<intptr_t>(group2));
 
   lilv_node_free(group2);
   lilv_node_free(group1);
@@ -551,7 +526,7 @@ portGroupLessThan(const PortContainer& p1, const PortContainer& p2)
   return cmp < 0;
 }
 
-static QWidget*
+QWidget*
 build_control_widget(Jalv* jalv)
 {
   const LilvPlugin* plugin = jalv->plugin;
@@ -579,8 +554,8 @@ build_control_widget(Jalv* jalv)
   LilvNode*    lastGroup   = nullptr;
   QHBoxLayout* groupLayout = nullptr;
   for (int i = 0; i < portContainers.count(); ++i) {
-    const PortContainer portContainer = portContainers[i];
-    Port* const         port          = portContainer.port;
+    const PortContainer   portContainer = portContainers[i];
+    const JalvPort* const port          = portContainer.port;
 
     auto* const control = new Control(portContainer, nullptr);
     LilvNode*   group =
@@ -588,7 +563,7 @@ build_control_widget(Jalv* jalv)
     if (group) {
       if (!groupLayout || !lilv_node_equals(group, lastGroup)) {
         // Group has changed
-        LilvNode* groupName =
+        const LilvNode* groupName =
           lilv_world_get(world, group, jalv->nodes.lv2_name, nullptr);
         if (!groupName) {
           groupName =
@@ -619,20 +594,62 @@ build_control_widget(Jalv* jalv)
   return grid;
 }
 
+} // namespace
+
+extern "C" {
+
+int
+jalv_frontend_init(JalvFrontendArgs* const args, JalvOptions*)
+{
+  app = new QApplication(*args->argc, *args->argv, true);
+  app->setStyleSheet("QGroupBox::title { subcontrol-position: top center }");
+  --*args->argc;
+  ++*args->argv;
+  return 0;
+}
+
+const char*
+jalv_frontend_ui_type(void)
+{
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+  return "http://lv2plug.in/ns/extensions/ui#Qt5UI";
+#else
+  return "http://lv2plug.in/ns/extensions/ui#Qt6UI";
+#endif
+}
+
+void
+jalv_frontend_port_event(Jalv*       jalv,
+                         uint32_t    port_index,
+                         uint32_t    buffer_size,
+                         uint32_t    protocol,
+                         const void* buffer)
+{
+  if (jalv->ui_instance) {
+    suil_instance_port_event(
+      jalv->ui_instance, port_index, buffer_size, protocol, buffer);
+  } else {
+    auto* const control = static_cast<Control*>(jalv->ports[port_index].widget);
+    if (control) {
+      control->setValue(*static_cast<const float*>(buffer));
+    }
+  }
+}
+
 bool
-jalv_frontend_discover(Jalv*)
+jalv_frontend_discover(const Jalv*)
 {
   return true;
 }
 
 float
-jalv_frontend_refresh_rate(Jalv*)
+jalv_frontend_refresh_rate(const Jalv*)
 {
   return static_cast<float>(QGuiApplication::primaryScreen()->refreshRate());
 }
 
 float
-jalv_frontend_scale_factor(Jalv*)
+jalv_frontend_scale_factor(const Jalv*)
 {
   return static_cast<float>(
     QGuiApplication::primaryScreen()->devicePixelRatio());
@@ -667,13 +684,13 @@ jalv_frontend_open(Jalv* jalv)
   if (jalv->ui_instance) {
     widget = static_cast<QWidget*>(suil_instance_get_widget(jalv->ui_instance));
   } else {
-    QWidget* controlWidget = build_control_widget(jalv);
-
-    widget = new QScrollArea();
-    static_cast<QScrollArea*>(widget)->setWidget(controlWidget);
-    static_cast<QScrollArea*>(widget)->setWidgetResizable(true);
-    widget->setMinimumWidth(800);
-    widget->setMinimumHeight(600);
+    auto* const controlWidget = build_control_widget(jalv);
+    auto* const scrollArea    = new QScrollArea();
+    scrollArea->setWidget(controlWidget);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setMinimumWidth(800);
+    scrollArea->setMinimumHeight(600);
+    widget = scrollArea;
   }
 
   LilvNode* name = lilv_plugin_get_name(jalv->plugin);
@@ -686,7 +703,7 @@ jalv_frontend_open(Jalv* jalv)
   jalv_init_ui(jalv);
 
   win->show();
-  if (jalv->ui_instance && !jalv_ui_is_resizable(jalv)) {
+  if (jalv->ui_instance && !jalv_ui_is_resizable(jalv->world, jalv->ui)) {
     widget->setMinimumSize(widget->width(), widget->height());
     widget->setMaximumSize(widget->width(), widget->height());
     win->adjustSize();
@@ -696,7 +713,7 @@ jalv_frontend_open(Jalv* jalv)
   }
 
   auto* const timer = new Timer(jalv);
-  timer->start(1000 / jalv->ui_update_hz);
+  timer->start((int)(1000.0f / jalv->settings.ui_update_hz));
 
   const int ret = app->exec();
   zix_sem_post(&jalv->done);

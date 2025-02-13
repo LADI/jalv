@@ -6,14 +6,15 @@
 
 #include "attributes.h"
 
-#include "zix/sem.h"
-
-#include "lv2/core/lv2.h"
-#include "lv2/worker/worker.h"
+#include <lv2/core/lv2.h>
+#include <lv2/worker/worker.h>
+#include <zix/sem.h>
+#include <zix/status.h>
 
 #include <stdbool.h>
 #include <stdint.h>
 
+// Worker implementation
 JALV_BEGIN_DECLS
 
 /**
@@ -36,17 +37,23 @@ JalvWorker*
 jalv_worker_new(ZixSem* lock, bool threaded);
 
 /**
-   Start performing work for a plugin, launching the thread if necessary.
+   Free a worker allocated with jalv_worker_new().
 
-   This must be called before scheduling any work.
-
-   @param iface Worker interface from plugin.
-   @param handle Handle to the LV2 plugin this worker is for.
+   Calls jalv_worker_exit() to terminate the running thread if necessary.
 */
 void
-jalv_worker_start(JalvWorker*                 worker,
-                  const LV2_Worker_Interface* iface,
-                  LV2_Handle                  handle);
+jalv_worker_free(JalvWorker* worker);
+
+/**
+   Launch the worker's thread.
+
+   For threaded workers, this launches the thread if it isn't already running.
+   For non-threaded workers, this does nothing.
+
+   @return Zero on success, or a non-zero error code if launching failed.
+*/
+ZixStatus
+jalv_worker_launch(JalvWorker* worker);
 
 /**
    Terminate the worker's thread if necessary.
@@ -58,12 +65,18 @@ void
 jalv_worker_exit(JalvWorker* worker);
 
 /**
-   Free a worker allocated with jalv_worker_new().
+   Attach the worker to a plugin instance.
 
-   Calls jalv_worker_exit() to terminate the running thread if necessary.
+   This must be called before scheduling any work.
+
+   @param worker Worker to activate and attach to a plugin.
+   @param iface Worker interface from plugin.
+   @param handle Handle to the LV2 plugin this worker is for.
 */
 void
-jalv_worker_free(JalvWorker* worker);
+jalv_worker_attach(JalvWorker*                 worker,
+                   const LV2_Worker_Interface* iface,
+                   LV2_Handle                  handle);
 
 /**
    Schedule work to be performed by the worker in the audio thread.

@@ -4,8 +4,8 @@
 #include "lv2_evbuf.h"
 #include "jalv_config.h"
 
-#include "lv2/atom/atom.h"
-#include "lv2/atom/util.h"
+#include <lv2/atom/atom.h>
+#include <lv2/atom/util.h>
 
 #include <assert.h>
 #include <stdlib.h>
@@ -50,7 +50,9 @@ lv2_evbuf_new(uint32_t capacity, uint32_t atom_Chunk, uint32_t atom_Sequence)
 void
 lv2_evbuf_free(LV2_Evbuf* evbuf)
 {
-  free(evbuf);
+  if (evbuf) {
+    free(evbuf);
+  }
 }
 
 void
@@ -110,9 +112,8 @@ lv2_evbuf_next(const LV2_Evbuf_Iterator iter)
   }
 
   LV2_Atom_Sequence* aseq = &iter.evbuf->buf;
-  LV2_Atom_Event*    aev =
-    (LV2_Atom_Event*)((char*)LV2_ATOM_CONTENTS(LV2_Atom_Sequence, aseq) +
-                      iter.offset);
+  const char* abuf = (const char*)LV2_ATOM_CONTENTS(LV2_Atom_Sequence, aseq);
+  const LV2_Atom_Event* aev = (const LV2_Atom_Event*)(abuf + iter.offset);
 
   const uint32_t offset =
     iter.offset + lv2_atom_pad_size(sizeof(LV2_Atom_Event) + aev->body.size);

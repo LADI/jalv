@@ -1,4 +1,4 @@
-// Copyright 2007-2022 David Robillard <d@drobilla.net>
+// Copyright 2007-2024 David Robillard <d@drobilla.net>
 // SPDX-License-Identifier: ISC
 
 #ifndef JALV_TYPES_H
@@ -6,16 +6,32 @@
 
 #include "attributes.h"
 
+// Basic internal type declarations
 JALV_BEGIN_DECLS
 
-/// Backend playing state
-typedef enum { JALV_RUNNING, JALV_PAUSE_REQUESTED, JALV_PAUSED } JalvPlayState;
+/// Process thread running state
+typedef enum {
+  JALV_RUNNING, ///< Active and running the plugin
+  JALV_PAUSED,  ///< Active but bypassing the plugin (silent)
+} JalvRunState;
 
 /// "Global" application state
 typedef struct JalvImpl Jalv;
 
 /// Audio/MIDI backend
 typedef struct JalvBackendImpl JalvBackend;
+
+/// Plugin port "direction"
+typedef enum { FLOW_UNKNOWN, FLOW_INPUT, FLOW_OUTPUT } PortFlow;
+
+/// Plugin port type
+typedef enum {
+  TYPE_UNKNOWN,
+  TYPE_CONTROL,
+  TYPE_AUDIO,
+  TYPE_EVENT,
+  TYPE_CV
+} PortType;
 
 JALV_END_DECLS
 

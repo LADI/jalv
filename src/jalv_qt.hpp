@@ -1,26 +1,26 @@
 // Copyright 2007-2022 David Robillard <d@drobilla.net>
 // SPDX-License-Identifier: ISC
 
+#include "port.h"
 #include "state.h"
 #include "types.h"
 
-#include "lilv/lilv.h"
+#include <lilv/lilv.h>
 
 #include <QAction>
 #include <QGroupBox>
+#include <QObject>
 #include <QString>
 #include <QtCore>
 
 #include <map>
 #include <vector>
 
-struct Port;
-
 class QDial;
 class QLabel;
 class QWidget;
 
-class PresetAction : public QAction
+class PresetAction final : public QAction
 {
   Q_OBJECT // NOLINT
 
@@ -41,11 +41,11 @@ private:
 };
 
 struct PortContainer {
-  Jalv* jalv;
-  Port* port;
+  Jalv*     jalv;
+  JalvPort* port;
 };
 
-class Control : public QGroupBox
+class Control final : public QGroupBox
 {
   Q_OBJECT // NOLINT
 
@@ -62,19 +62,19 @@ private:
   float   getValue();
   int     stringWidth(const QString& str);
 
-  QDial*            dial;
-  const LilvPlugin* plugin;
-  Port*             port;
+  QDial*    _dial;
+  Jalv*     _jalv;
+  JalvPort* _port;
 
-  QLabel* label;
-  QString name;
-  int     steps;
-  float   max{1.0f};
-  float   min{0.0f};
-  bool    isInteger{};
-  bool    isEnum{};
-  bool    isLogarithmic{};
+  QLabel* _label;
+  QString _name;
+  int     _steps;
+  float   _max{1.0f};
+  float   _min{0.0f};
+  bool    _isInteger{};
+  bool    _isEnum{};
+  bool    _isLogarithmic{};
 
-  std::vector<float>           scalePoints;
-  std::map<float, const char*> scaleMap;
+  std::vector<float>           _scalePoints;
+  std::map<float, const char*> _scaleMap;
 };

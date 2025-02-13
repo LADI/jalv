@@ -4,18 +4,20 @@
 #include "control.h"
 
 #include "log.h"
+#include "nodes.h"
+#include "string_utils.h"
 
-#include "lilv/lilv.h"
-#include "lv2/atom/atom.h"
-#include "lv2/atom/forge.h"
-#include "lv2/urid/urid.h"
+#include <lilv/lilv.h>
+#include <lv2/atom/atom.h>
+#include <lv2/atom/forge.h>
+#include <lv2/urid/urid.h>
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 
-int
+/// Order scale points by value
+static int
 scale_point_cmp(const ScalePoint* a, const ScalePoint* b)
 {
   if (a->value < b->value) {
@@ -30,22 +32,21 @@ scale_point_cmp(const ScalePoint* a, const ScalePoint* b)
 }
 
 ControlID*
-new_port_control(LilvWorld* const        world,
-                 const LilvPlugin* const plugin,
-                 const LilvPort* const   port,
-                 uint32_t                port_index,
-                 const float             sample_rate,
-                 const JalvNodes* const  nodes,
-                 LV2_Atom_Forge* const   forge)
+new_port_control(LilvWorld* const            world,
+                 const LilvPlugin* const     plugin,
+                 const LilvPort* const       port,
+                 uint32_t                    port_index,
+                 const float                 sample_rate,
+                 const JalvNodes* const      nodes,
+                 const LV2_Atom_Forge* const forge)
 {
   ControlID* id = (ControlID*)calloc(1, sizeof(ControlID));
 
   id->type        = PORT;
+  id->id.index    = port_index;
   id->node        = lilv_node_duplicate(lilv_port_get_node(plugin, port));
   id->symbol      = lilv_node_duplicate(lilv_port_get_symbol(plugin, port));
   id->label       = lilv_port_get_name(plugin, port);
-  id->forge       = forge;
-  id->index       = port_index;
   id->group       = lilv_port_get(plugin, port, nodes->pg_group);
   id->value_type  = forge->Float;
   id->is_writable = lilv_port_is_a(plugin, port, nodes->lv2_InputPort);
@@ -88,7 +89,7 @@ new_port_control(LilvWorld* const        world,
         id->points[np].value =
           lilv_node_as_float(lilv_scale_point_get_value(p));
         id->points[np].label =
-          strdup(lilv_node_as_string(lilv_scale_point_get_label(p)));
+          jalv_strdup(lilv_node_as_string(lilv_scale_point_get_label(p)));
         ++np;
       }
       // TODO: Non-float scale points?
@@ -120,18 +121,17 @@ has_range(LilvWorld* const       world,
 }
 
 ControlID*
-new_property_control(LilvWorld* const       world,
-                     const LilvNode*        property,
-                     const JalvNodes* const nodes,
-                     LV2_URID_Map* const    map,
-                     LV2_Atom_Forge* const  forge)
+new_property_control(LilvWorld* const            world,
+                     const LilvNode*             property,
+                     const JalvNodes* const      nodes,
+                     LV2_URID_Map* const         map,
+                     const LV2_Atom_Forge* const forge)
 {
-  ControlID* id = (ControlID*)calloc(1, sizeof(ControlID));
-  id->type      = PROPERTY;
-  id->node      = lilv_node_duplicate(property);
-  id->symbol    = lilv_world_get_symbol(world, property);
-  id->forge     = forge;
-  id->property  = map->map(map->handle, lilv_node_as_uri(property));
+  ControlID* id   = (ControlID*)calloc(1, sizeof(ControlID));
+  id->type        = PROPERTY;
+  id->id.property = map->map(map->handle, lilv_node_as_uri(property));
+  id->node        = lilv_node_duplicate(property);
+  id->symbol      = lilv_world_get_symbol(world, property);
 
   id->label = lilv_world_get(world, property, nodes->rdfs_label, NULL);
   id->min   = lilv_world_get(world, property, nodes->lv2_minimum, NULL);
@@ -168,19 +168,36 @@ new_property_control(LilvWorld* const       world,
 }
 
 void
+free_control(ControlID* const control)
+{
+  lilv_node_free(control->node);
+  lilv_node_free(control->symbol);
+  lilv_node_free(control->label);
+  lilv_node_free(control->group);
+  lilv_node_free(control->min);
+  lilv_node_free(control->max);
+  lilv_node_free(control->def);
+  free(control);
+}
+
+void
 add_control(Controls* controls, ControlID* control)
 {
-  controls->controls = (ControlID**)realloc(
+  ControlID** const new_controls = (ControlID**)realloc(
     controls->controls, (controls->n_controls + 1) * sizeof(ControlID*));
 
-  controls->controls[controls->n_controls++] = control;
+  if (new_controls) {
+    controls->controls                         = new_controls;
+    controls->controls[controls->n_controls++] = control;
+  }
 }
 
 ControlID*
 get_property_control(const Controls* controls, LV2_URID property)
 {
   for (size_t i = 0; i < controls->n_controls; ++i) {
-    if (controls->controls[i]->property == property) {
+    if (controls->controls[i]->type == PROPERTY &&
+        controls->controls[i]->id.property == property) {
       return controls->controls[i];
     }
   }

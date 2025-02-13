@@ -1,33 +1,39 @@
-// Copyright 2007-2016 David Robillard <d@drobilla.net>
+// Copyright 2007-2024 David Robillard <d@drobilla.net>
 // SPDX-License-Identifier: ISC
 
 #include "state.h"
 
-#include "jalv_internal.h"
+#include "comm.h"
+#include "jalv.h"
 #include "log.h"
-#include "nodes.h"
+#include "mapper.h"
 #include "port.h"
+#include "process.h"
+#include "types.h"
 
-#include "lilv/lilv.h"
-#include "lv2/atom/forge.h"
-#include "lv2/core/lv2.h"
-#include "lv2/state/state.h"
-#include "lv2/urid/urid.h"
-#include "zix/attributes.h"
-#include "zix/sem.h"
+#include <lilv/lilv.h>
+#include <lv2/core/lv2.h>
+#include <lv2/state/state.h>
+#include <lv2/urid/urid.h>
+#include <zix/attributes.h>
+#include <zix/path.h>
+#include <zix/ring.h>
+#include <zix/sem.h>
+#include <zix/status.h>
 
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-char*
+ZIX_MALLOC_FUNC char*
 jalv_make_path(LV2_State_Make_Path_Handle handle, const char* path)
 {
   Jalv* jalv = (Jalv*)handle;
 
   // Create in save directory if saving, otherwise use temp directory
-  return jalv_strjoin(jalv->save_dir ? jalv->save_dir : jalv->temp_dir, path);
+  const char* const dir = jalv->save_dir ? jalv->save_dir : jalv->temp_dir;
+  return zix_path_join(NULL, dir, path);
 }
 
 static const void*
@@ -36,12 +42,12 @@ get_port_value(const char* port_symbol,
                uint32_t*   size,
                uint32_t*   type)
 {
-  Jalv*        jalv = (Jalv*)user_data;
-  struct Port* port = jalv_port_by_symbol(jalv, port_symbol);
+  Jalv* const           jalv = (Jalv*)user_data;
+  const JalvPort* const port = jalv_port_by_symbol(jalv, port_symbol);
   if (port && port->flow == FLOW_INPUT && port->type == TYPE_CONTROL) {
     *size = sizeof(float);
     *type = jalv->forge.Float;
-    return &port->control;
+    return &jalv->process.controls_buf[port->index];
   }
   *size = *type = 0;
   return NULL;
@@ -50,12 +56,15 @@ get_port_value(const char* port_symbol,
 void
 jalv_save(Jalv* jalv, const char* dir)
 {
-  jalv->save_dir = jalv_strjoin(dir, "/");
+  LV2_URID_Map* const   map   = jalv_mapper_urid_map(jalv->mapper);
+  LV2_URID_Unmap* const unmap = jalv_mapper_urid_unmap(jalv->mapper);
+
+  jalv->save_dir = zix_path_join(NULL, dir, NULL);
 
   LilvState* const state =
     lilv_state_new_from_instance(jalv->plugin,
-                                 jalv->instance,
-                                 &jalv->map,
+                                 jalv->process.instance,
+                                 map,
                                  jalv->temp_dir,
                                  dir,
                                  dir,
@@ -65,11 +74,8 @@ jalv_save(Jalv* jalv, const char* dir)
                                  LV2_STATE_IS_POD | LV2_STATE_IS_PORTABLE,
                                  NULL);
 
-  lilv_state_save(
-    jalv->world, &jalv->map, &jalv->unmap, state, NULL, dir, "state.ttl");
-
+  lilv_state_save(jalv->world, map, unmap, state, NULL, dir, "state.ttl");
   lilv_state_free(state);
-
   free(jalv->save_dir);
   jalv->save_dir = NULL;
 }
@@ -124,8 +130,9 @@ set_port_value(const char* port_symbol,
                uint32_t    ZIX_UNUSED(size),
                uint32_t    type)
 {
-  Jalv*        jalv = (Jalv*)user_data;
-  struct Port* port = jalv_port_by_symbol(jalv, port_symbol);
+  Jalv* const           jalv = (Jalv*)user_data;
+  JalvProcess* const    proc = &jalv->process;
+  const JalvPort* const port = jalv_port_by_symbol(jalv, port_symbol);
   if (!port) {
     jalv_log(JALV_LOG_ERR, "Preset port `%s' is missing\n", port_symbol);
     return;
@@ -144,51 +151,71 @@ set_port_value(const char* port_symbol,
     jalv_log(JALV_LOG_ERR,
              "Preset `%s' value has bad type <%s>\n",
              port_symbol,
-             jalv->unmap.unmap(jalv->unmap.handle, type));
+             jalv_mapper_unmap_uri(jalv->mapper, type));
     return;
   }
 
-  if (jalv->play_state != JALV_RUNNING) {
+  ZixStatus st = ZIX_STATUS_SUCCESS;
+  if (proc->run_state != JALV_RUNNING) {
     // Set value on port struct directly
-    port->control = fvalue;
+    proc->controls_buf[port->index] = fvalue;
   } else {
     // Send value to plugin (as if from UI)
-    jalv_write_control(jalv, jalv->ui_to_plugin, port->index, fvalue);
+    st = jalv_write_control(proc->ui_to_plugin, port->index, fvalue);
   }
 
-  if (jalv->has_ui) {
+  if (proc->has_ui) {
     // Update UI (as if from plugin)
-    jalv_write_control(jalv, jalv->plugin_to_ui, port->index, fvalue);
+    st = jalv_write_control(proc->plugin_to_ui, port->index, fvalue);
+  }
+
+  if (st) {
+    jalv_log(
+      JALV_LOG_ERR, "Failed to write control change (%s)\n", zix_strerror(st));
   }
 }
 
 void
-jalv_apply_state(Jalv* jalv, LilvState* state)
+jalv_apply_state(Jalv* jalv, const LilvState* state)
 {
-  bool must_pause = !jalv->safe_restore && jalv->play_state == JALV_RUNNING;
-  if (state) {
-    if (must_pause) {
-      jalv->play_state = JALV_PAUSE_REQUESTED;
-      zix_sem_wait(&jalv->paused);
-    }
+  JalvProcess* const proc = &jalv->process;
 
-    const LV2_Feature* state_features[9] = {
-      &jalv->features.map_feature,
-      &jalv->features.unmap_feature,
-      &jalv->features.make_path_feature,
-      &jalv->features.state_sched_feature,
-      &jalv->features.safe_restore_feature,
-      &jalv->features.log_feature,
-      &jalv->features.options_feature,
-      NULL};
+  typedef struct {
+    JalvMessageHeader  head;
+    JalvRunStateChange body;
+  } PauseMessage;
 
-    lilv_state_restore(
-      state, jalv->instance, set_port_value, jalv, 0, state_features);
+  const bool must_pause =
+    !jalv->safe_restore && proc->run_state == JALV_RUNNING;
+  if (must_pause) {
+    const PauseMessage pause_msg = {
+      {RUN_STATE_CHANGE, sizeof(JalvRunStateChange)}, {JALV_PAUSED}};
+    zix_ring_write(proc->ui_to_plugin, &pause_msg, sizeof(pause_msg));
 
-    if (must_pause) {
-      jalv->request_update = true;
-      jalv->play_state     = JALV_RUNNING;
-    }
+    zix_sem_wait(&proc->paused);
+  }
+
+  const LV2_Feature* state_features[9] = {
+    &jalv->features.map_feature,
+    &jalv->features.unmap_feature,
+    &jalv->features.make_path_feature,
+    &jalv->features.state_sched_feature,
+    &jalv->features.safe_restore_feature,
+    &jalv->features.log_feature,
+    &jalv->features.options_feature,
+    NULL,
+  };
+
+  lilv_state_restore(
+    state, proc->instance, set_port_value, jalv, 0, state_features);
+
+  if (must_pause) {
+    const JalvMessageHeader state_msg = {STATE_REQUEST, 0U};
+    zix_ring_write(proc->ui_to_plugin, &state_msg, sizeof(state_msg));
+
+    const PauseMessage run_msg = {
+      {RUN_STATE_CHANGE, sizeof(JalvRunStateChange)}, {JALV_RUNNING}};
+    zix_ring_write(proc->ui_to_plugin, &run_msg, sizeof(run_msg));
   }
 }
 
@@ -196,8 +223,11 @@ int
 jalv_apply_preset(Jalv* jalv, const LilvNode* preset)
 {
   lilv_state_free(jalv->preset);
-  jalv->preset = lilv_state_new_from_world(jalv->world, &jalv->map, preset);
-  jalv_apply_state(jalv, jalv->preset);
+  jalv->preset = lilv_state_new_from_world(
+    jalv->world, jalv_mapper_urid_map(jalv->mapper), preset);
+  if (jalv->preset) {
+    jalv_apply_state(jalv, jalv->preset);
+  }
   return 0;
 }
 
@@ -208,10 +238,13 @@ jalv_save_preset(Jalv*       jalv,
                  const char* label,
                  const char* filename)
 {
+  LV2_URID_Map* const   map   = jalv_mapper_urid_map(jalv->mapper);
+  LV2_URID_Unmap* const unmap = jalv_mapper_urid_unmap(jalv->mapper);
+
   LilvState* const state =
     lilv_state_new_from_instance(jalv->plugin,
-                                 jalv->instance,
-                                 &jalv->map,
+                                 jalv->process.instance,
+                                 map,
                                  jalv->temp_dir,
                                  dir,
                                  dir,
@@ -225,8 +258,7 @@ jalv_save_preset(Jalv*       jalv,
     lilv_state_set_label(state, label);
   }
 
-  int ret = lilv_state_save(
-    jalv->world, &jalv->map, &jalv->unmap, state, uri, dir, filename);
+  int ret = lilv_state_save(jalv->world, map, unmap, state, uri, dir, filename);
 
   lilv_state_free(jalv->preset);
   jalv->preset = state;

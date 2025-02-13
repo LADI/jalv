@@ -7,8 +7,9 @@
 
 #include "attributes.h"
 
-#include "lilv/lilv.h"
+#include <lilv/lilv.h>
 
+// Cached lilv nodes
 JALV_BEGIN_DECLS
 
 typedef struct {
@@ -26,9 +27,11 @@ typedef struct {
   LilvNode* lv2_connectionOptional;
   LilvNode* lv2_control;
   LilvNode* lv2_default;
+  LilvNode* lv2_designation;
   LilvNode* lv2_enumeration;
   LilvNode* lv2_extensionData;
   LilvNode* lv2_integer;
+  LilvNode* lv2_latency;
   LilvNode* lv2_maximum;
   LilvNode* lv2_minimum;
   LilvNode* lv2_name;
@@ -47,11 +50,18 @@ typedef struct {
   LilvNode* rdfs_label;
   LilvNode* rdfs_range;
   LilvNode* rsz_minimumSize;
+  LilvNode* state_threadSafeRestore;
   LilvNode* ui_showInterface;
   LilvNode* work_interface;
   LilvNode* work_schedule;
   LilvNode* end; ///< NULL terminator for easy freeing of entire structure
 } JalvNodes;
+
+void
+jalv_init_nodes(LilvWorld* world, JalvNodes* nodes);
+
+void
+jalv_free_nodes(JalvNodes* nodes);
 
 JALV_END_DECLS
 

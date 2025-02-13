@@ -4,13 +4,9 @@
 #include "log.h"
 
 #include "jalv_config.h"
-#include "jalv_internal.h"
-#include "port.h"
-#include "urids.h"
 
-#include "lilv/lilv.h"
-#include "lv2/log/log.h"
-#include "lv2/urid/urid.h"
+#include <lv2/log/log.h>
+#include <lv2/urid/urid.h>
 
 #if USE_ISATTY
 #  include <unistd.h>
@@ -19,42 +15,9 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
-void
-jalv_print_control(Jalv* const              jalv,
-                   const struct Port* const port,
-                   const float              value)
-{
-  const LilvNode* sym = lilv_port_get_symbol(jalv->plugin, port->lilv_port);
-  jalv_log(JALV_LOG_INFO, "%s = %f\n", lilv_node_as_string(sym), value);
-}
-
-char*
-jalv_strdup(const char* const str)
-{
-  const size_t len  = strlen(str);
-  char*        copy = (char*)malloc(len + 1);
-  memcpy(copy, str, len + 1);
-  return copy;
-}
-
-char*
-jalv_strjoin(const char* const a, const char* const b)
-{
-  const size_t a_len = strlen(a);
-  const size_t b_len = strlen(b);
-  char* const  out   = (char*)malloc(a_len + b_len + 1);
-
-  memcpy(out, a, a_len);
-  memcpy(out + a_len, b, b_len);
-  out[a_len + b_len] = '\0';
-
-  return out;
-}
-
-int
+JALV_LOG_FUNC(2, 0)
+static int
 jalv_vlog(const JalvLogLevel level, const char* const fmt, va_list ap)
 {
   bool fancy = false;
@@ -133,6 +96,9 @@ jalv_ansi_start(FILE* stream, int color)
   if (isatty(fileno(stream))) {
     return fprintf(stream, "\033[0;%dm", color);
   }
+#else
+  (void)stream;
+  (void)color;
 #endif
   return 0;
 }
@@ -145,5 +111,7 @@ jalv_ansi_reset(FILE* stream)
     fprintf(stream, "\033[0m");
     fflush(stream);
   }
+#else
+  (void)stream;
 #endif
 }

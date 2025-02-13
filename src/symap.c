@@ -88,12 +88,11 @@ symap_search(const Symap* const map, const char* const sym, bool* const exact)
   uint32_t lower = 0;
   uint32_t upper = map->size - 1;
   uint32_t i     = upper;
-  int      cmp   = 0;
 
   while (upper >= lower) {
-    i   = lower + ((upper - lower) / 2);
-    cmp = strcmp(map->symbols[map->index[i] - 1], sym);
+    i = lower + ((upper - lower) / 2);
 
+    const int cmp = strcmp(map->symbols[map->index[i] - 1], sym);
     if (cmp == 0) {
       *exact = true;
       return i;
@@ -191,7 +190,7 @@ symap_unmap(const Symap* const map, const uint32_t id)
 #  include <stdio.h>
 
 static void
-symap_dump(Symap* const map)
+symap_dump(const Symap* const map)
 {
   fprintf(stderr, "{\n");
   for (uint32_t i = 0; i < map->size; ++i) {

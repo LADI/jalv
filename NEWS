@@ -4,18 +4,33 @@ ladi-jalv unstable; urgency=medium
 
 -- Nedko Arnaudov
 
-jalv (1.6.9) stable; urgency=medium
+jalv (1.6.9) unstable; urgency=medium
 
+  * Add Qt6 version
   * Add missing short versions of command line options
+  * Add option to install tool man pages
+  * Add support for control outputs with lv2:latency designation
   * Build Qt UI with -fPIC
+  * Clean up and strengthen code
   * Clean up command line help output
+  * Cleanly separate audio thread from the rest of the application
+  * Fix Jack latency recomputation when plugin latency changes
   * Fix clashing command line options
+  * Fix minor memory leaks
+  * Make help and version commands exit successfully
+  * Only send control messages to designated lv2:control ports
+  * Reduce Jack process callback overhead
   * Remove Gtk2 interface
+  * Remove limits on the size of messages sent from plugin to UI
+  * Remove transport position dumping from Jack process callback
   * Replace use of deprecated Gtk interfaces
+  * Rewrite man pages in mdoc
   * Switch to external zix dependency
   * Use Gtk switches instead of checkboxes for toggle controls
+  * Use fewer platform-specific APIs
+  * Use portable zix filesystem API
 
- -- David Robillard <d@drobilla.net>  Sun, 11 Dec 2022 21:51:58 +0000
+ -- David Robillard <d@drobilla.net>  Fri, 20 Dec 2024 00:45:28 +0000
 
 jalv (1.6.8) stable; urgency=medium
 

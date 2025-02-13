@@ -1,31 +1,34 @@
-// Copyright 2007-2022 David Robillard <d@drobilla.net>
+// Copyright 2007-2024 David Robillard <d@drobilla.net>
 // SPDX-License-Identifier: ISC
 
+#include "comm.h"
 #include "control.h"
 #include "frontend.h"
+#include "jalv.h"
 #include "jalv_config.h"
-#include "jalv_internal.h"
 #include "log.h"
 #include "options.h"
 #include "port.h"
 #include "state.h"
+#include "string_utils.h"
 #include "types.h"
 
-#include "lilv/lilv.h"
-#include "lv2/ui/ui.h"
-#include "zix/attributes.h"
-#include "zix/sem.h"
+#include <lilv/lilv.h>
+#include <lv2/ui/ui.h>
+#include <zix/attributes.h>
+#include <zix/sem.h>
 
 #if USE_SUIL
-#  include "suil/suil.h"
+#  include <suil/suil.h>
 #endif
 
 #ifdef _WIN32
 #  include <synchapi.h>
 #else
-#  include <unistd.h>
+#  include <time.h>
 #endif
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,39 +42,55 @@ print_usage(const char* name, bool error)
   fprintf(os, "Usage: %s [OPTION...] PLUGIN_URI\n", name);
   fprintf(os,
           "Run an LV2 plugin as a Jack application.\n"
-          "  -b SIZE      Buffer size for plugin <=> UI communication\n"
-          "  -c SYM=VAL   Set control value (e.g. \"vol=1.4\")\n"
-          "  -d           Dump plugin <=> UI communication\n"
-          "  -h           Display this help and exit\n"
-          "  -i           Ignore keyboard input, run non-interactively\n"
-          "  -l DIR       Load state from save directory\n"
-          "  -n NAME      JACK client name\n"
-          "  -p           Print control output changes to stdout\n"
-          "  -s           Show plugin UI if possible\n"
-          "  -t           Print trace messages from plugin\n"
-          "  -U URI       Load the UI with the given URI\n"
-          "  -V           Display version information and exit\n"
-          "  -x           Exit if the requested JACK client name is taken.\n");
-  return error ? 1 : 0;
+          "  -b SIZE     Buffer size for plugin <=> UI communication\n"
+          "  -c SYM=VAL  Set control value (like \"vol=1.4\")\n"
+          "  -d          Dump plugin <=> UI communication\n"
+          "  -h          Display this help and exit\n"
+          "  -i          Ignore keyboard input, run non-interactively\n"
+          "  -l DIR      Load state from save directory\n"
+          "  -n NAME     JACK client name\n"
+          "  -p          Print control output changes to stdout\n"
+          "  -s          Show plugin UI if possible\n"
+          "  -t          Print trace messages from plugin\n"
+          "  -U URI      Load the UI with the given URI\n"
+          "  -V          Display version information and exit\n"
+          "  -x          Exit if the requested JACK client name is taken\n");
+  return error ? 1 : JALV_EARLY_EXIT_STATUS;
 }
 
 static int
 print_version(void)
 {
   printf("jalv " JALV_VERSION " <http://drobilla.net/software/jalv>\n");
-  printf("Copyright 2011-2022 David Robillard <d@drobilla.net>.\n"
+  printf("Copyright 2011-2024 David Robillard <d@drobilla.net>\n"
          "License ISC: <https://spdx.org/licenses/ISC>.\n"
          "This is free software; you are free to change and redistribute it."
          "\nThere is NO WARRANTY, to the extent permitted by law.\n");
+  return JALV_EARLY_EXIT_STATUS;
+}
+
+static int
+print_arg_error(const char* const command, const char* const msg)
+{
+  fprintf(stderr, "%s: %s\n", command, msg);
   return 1;
 }
 
+static void
+print_control_port(const Jalv* const     jalv,
+                   const JalvPort* const port,
+                   const float           value)
+{
+  const LilvNode* sym = lilv_port_get_symbol(jalv->plugin, port->lilv_port);
+  jalv_log(JALV_LOG_INFO, "%s = %f\n", lilv_node_as_string(sym), value);
+}
+
 void
-jalv_ui_port_event(Jalv*       jalv,
-                   uint32_t    port_index,
-                   uint32_t    buffer_size,
-                   uint32_t    protocol,
-                   const void* buffer)
+jalv_frontend_port_event(Jalv*       jalv,
+                         uint32_t    port_index,
+                         uint32_t    buffer_size,
+                         uint32_t    protocol,
+                         const void* buffer)
 {
 #if USE_SUIL
   if (jalv->ui_instance) {
@@ -79,80 +98,90 @@ jalv_ui_port_event(Jalv*       jalv,
       jalv->ui_instance, port_index, buffer_size, protocol, buffer);
   }
 #else
-  (void)jalv;
-  (void)port_index;
   (void)buffer_size;
-  (void)protocol;
-  (void)buffer;
 #endif
+
+  if (!protocol && jalv->opts.print_controls) {
+    assert(buffer_size == sizeof(float));
+    print_control_port(jalv, &jalv->ports[port_index], *(float*)buffer);
+  }
 }
 
 int
-jalv_frontend_init(int* argc, char*** argv, JalvOptions* opts)
+jalv_frontend_init(JalvFrontendArgs* const args, JalvOptions* const opts)
 {
+  const int argc = *args->argc;
+  char**    argv = *args->argv;
+
+  const char* const cmd = argv[0];
+
   int n_controls = 0;
   int a          = 1;
-  for (; a < *argc && (*argv)[a][0] == '-'; ++a) {
-    if ((*argv)[a][1] == 'h') {
-      return print_usage((*argv)[0], true);
+  for (; a < argc && argv[a][0] == '-'; ++a) {
+    if (argv[a][1] == 'h' || !strcmp(argv[a], "--help")) {
+      return print_usage(cmd, false);
     }
 
-    if ((*argv)[a][1] == 'V') {
+    if (argv[a][1] == 'V' || !strcmp(argv[a], "--version")) {
       return print_version();
     }
 
-    if ((*argv)[a][1] == 's') {
+    if (argv[a][1] == 's') {
       opts->show_ui = true;
-    } else if ((*argv)[a][1] == 'p') {
+    } else if (argv[a][1] == 'p') {
       opts->print_controls = true;
-    } else if ((*argv)[a][1] == 'U') {
-      if (++a == *argc) {
-        fprintf(stderr, "Missing argument for -U\n");
-        return 1;
+    } else if (argv[a][1] == 'U') {
+      if (++a == argc) {
+        return print_arg_error(cmd, "option requires an argument -- 'U'");
       }
-      opts->ui_uri = jalv_strdup((*argv)[a]);
-    } else if ((*argv)[a][1] == 'l') {
-      if (++a == *argc) {
-        fprintf(stderr, "Missing argument for -l\n");
-        return 1;
+      opts->ui_uri = jalv_strdup(argv[a]);
+    } else if (argv[a][1] == 'l') {
+      if (++a == argc) {
+        return print_arg_error(cmd, "option requires an argument -- 'l'");
       }
-      opts->load = jalv_strdup((*argv)[a]);
-    } else if ((*argv)[a][1] == 'b') {
-      if (++a == *argc) {
-        fprintf(stderr, "Missing argument for -b\n");
-        return 1;
+      opts->load = jalv_strdup(argv[a]);
+    } else if (argv[a][1] == 'b') {
+      if (++a == argc) {
+        return print_arg_error(cmd, "option requires an argument -- 'b'");
       }
-      opts->buffer_size = atoi((*argv)[a]);
-    } else if ((*argv)[a][1] == 'c') {
-      if (++a == *argc) {
-        fprintf(stderr, "Missing argument for -c\n");
-        return 1;
+      opts->ring_size = atoi(argv[a]);
+    } else if (argv[a][1] == 'c') {
+      if (++a == argc) {
+        return print_arg_error(cmd, "option requires an argument -- 'c'");
       }
-      opts->controls =
-        (char**)realloc(opts->controls, (++n_controls + 1) * sizeof(char*));
-      opts->controls[n_controls - 1] = (*argv)[a];
-      opts->controls[n_controls]     = NULL;
-    } else if ((*argv)[a][1] == 'i') {
+
+      char** new_controls =
+        (char**)realloc(opts->controls, (n_controls + 2) * sizeof(char*));
+      if (!new_controls) {
+        fprintf(stderr, "Out of memory\n");
+        return 12;
+      }
+
+      opts->controls               = new_controls;
+      opts->controls[n_controls++] = argv[a];
+      opts->controls[n_controls]   = NULL;
+    } else if (argv[a][1] == 'i') {
       opts->non_interactive = true;
-    } else if ((*argv)[a][1] == 'd') {
+    } else if (argv[a][1] == 'd') {
       opts->dump = true;
-    } else if ((*argv)[a][1] == 't') {
+    } else if (argv[a][1] == 't') {
       opts->trace = true;
-    } else if ((*argv)[a][1] == 'n') {
-      if (++a == *argc) {
-        fprintf(stderr, "Missing argument for -n\n");
-        return 1;
+    } else if (argv[a][1] == 'n') {
+      if (++a == argc) {
+        return print_arg_error(cmd, "option requires an argument -- 'n'");
       }
       free(opts->name);
-      opts->name = jalv_strdup((*argv)[a]);
-    } else if ((*argv)[a][1] == 'x') {
+      opts->name = jalv_strdup(argv[a]);
+    } else if (argv[a][1] == 'x') {
       opts->name_exact = 1;
     } else {
-      fprintf(stderr, "Unknown option %s\n", (*argv)[a]);
-      return print_usage((*argv)[0], true);
+      fprintf(stderr, "%s: unknown option -- '%c'\n", cmd, argv[a][1]);
+      return print_usage(argv[0], true);
     }
   }
 
+  *args->argc = *args->argc - a;
+  *args->argv = *args->argv + a;
   return 0;
 }
 
@@ -163,17 +192,16 @@ jalv_frontend_ui_type(void)
 }
 
 static void
-jalv_print_controls(Jalv* jalv, bool writable, bool readable)
+print_controls(const Jalv* const jalv, const bool writable, const bool readable)
 {
   for (size_t i = 0; i < jalv->controls.n_controls; ++i) {
     ControlID* const control = jalv->controls.controls[i];
-    if ((control->is_writable && writable) ||
-        (control->is_readable && readable)) {
-      struct Port* const port = &jalv->ports[control->index];
+    if (control->type == PORT && ((control->is_writable && writable) ||
+                                  (control->is_readable && readable))) {
       jalv_log(JALV_LOG_INFO,
                "%s = %f\n",
                lilv_node_as_string(control->symbol),
-               port->control);
+               jalv->process.controls_buf[control->id.index]);
     }
   }
 
@@ -215,32 +243,24 @@ jalv_process_command(Jalv* jalv, const char* cmd)
     lilv_world_load_resource(jalv->world, preset);
     jalv_apply_preset(jalv, preset);
     lilv_node_free(preset);
-    jalv_print_controls(jalv, true, false);
+    print_controls(jalv, true, false);
   } else if (strcmp(cmd, "controls\n") == 0) {
-    jalv_print_controls(jalv, true, false);
+    print_controls(jalv, true, false);
   } else if (strcmp(cmd, "monitors\n") == 0) {
-    jalv_print_controls(jalv, false, true);
+    print_controls(jalv, false, true);
   } else if (sscanf(cmd, "set %u %f", &index, &value) == 2) {
     if (index < jalv->num_ports) {
-      jalv->ports[index].control = value;
-      jalv_print_control(jalv, &jalv->ports[index], value);
+      jalv_write_control(jalv->process.ui_to_plugin, index, value);
+      print_control_port(jalv, &jalv->ports[index], value);
     } else {
       fprintf(stderr, "error: port index out of range\n");
     }
   } else if (sscanf(cmd, "set %1023[a-zA-Z0-9_] %f", sym, &value) == 2 ||
              sscanf(cmd, "%1023[a-zA-Z0-9_] = %f", sym, &value) == 2) {
-    struct Port* port = NULL;
-    for (uint32_t i = 0; i < jalv->num_ports; ++i) {
-      struct Port*    p = &jalv->ports[i];
-      const LilvNode* s = lilv_port_get_symbol(jalv->plugin, p->lilv_port);
-      if (!strcmp(lilv_node_as_string(s), sym)) {
-        port = p;
-        break;
-      }
-    }
+    const JalvPort* const port = jalv_port_by_symbol(jalv, sym);
     if (port) {
-      port->control = value;
-      jalv_print_control(jalv, port, value);
+      jalv->process.controls_buf[port->index] = value;
+      print_control_port(jalv, port, value);
     } else {
       fprintf(stderr, "error: no control named `%s'\n", sym);
     }
@@ -250,7 +270,7 @@ jalv_process_command(Jalv* jalv, const char* cmd)
 }
 
 bool
-jalv_frontend_discover(Jalv* jalv)
+jalv_frontend_discover(const Jalv* jalv)
 {
   return jalv->opts.show_ui;
 }
@@ -282,7 +302,8 @@ jalv_run_custom_ui(Jalv* jalv)
 #  ifdef _WIN32
       Sleep(33);
 #  else
-      usleep(33333);
+      const struct timespec delay = {0, 33333000};
+      nanosleep(&delay, NULL);
 #  endif
     }
 
@@ -297,13 +318,13 @@ jalv_run_custom_ui(Jalv* jalv)
 }
 
 float
-jalv_frontend_refresh_rate(Jalv* ZIX_UNUSED(jalv))
+jalv_frontend_refresh_rate(const Jalv* ZIX_UNUSED(jalv))
 {
   return 30.0f;
 }
 
 float
-jalv_frontend_scale_factor(Jalv* ZIX_UNUSED(jalv))
+jalv_frontend_scale_factor(const Jalv* ZIX_UNUSED(jalv))
 {
   return 1.0f;
 }
@@ -318,6 +339,16 @@ jalv_frontend_select_plugin(Jalv* jalv)
 int
 jalv_frontend_open(Jalv* jalv)
 {
+  // Print initial control values
+  for (size_t i = 0; i < jalv->controls.n_controls; ++i) {
+    ControlID* control = jalv->controls.controls[i];
+    if (control->type == PORT && control->is_writable) {
+      const JalvPort* const port = &jalv->ports[control->id.index];
+      print_control_port(
+        jalv, port, jalv->process.controls_buf[control->id.index]);
+    }
+  }
+
   if (!jalv_run_custom_ui(jalv) && !jalv->opts.non_interactive) {
     // Primitive command prompt for setting control values
     while (zix_sem_try_wait(&jalv->done)) {
