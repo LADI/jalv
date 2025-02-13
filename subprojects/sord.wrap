@@ -4,5 +4,5 @@
 [wrap-git]
 url = https://gitlab.com/drobilla/sord.git
 push-url = ssh://git@gitlab.com:drobilla/sord.git
-revision = master
+revision = main
 depth = 1
