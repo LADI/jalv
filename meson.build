@@ -326,7 +326,7 @@ if not get_option('gtk2').disabled()
 
   if gdk2_dep.found() and gtk2_dep.found()
     executable(
-      'jalv.gtk',
+      'jalv.gtk2',
       sources + files('src/jalv_gtk2.c'),
       c_args: c_suppressions + platform_defines + suil_defines,
       dependencies: common_dependencies + [gdk2_dep, gtk2_dep, suil_dep],
