@@ -3,10 +3,11 @@
 
 #include "control.h"
 #include "frontend.h"
-#include "jalv_internal.h"
+#include "jalv.h"
 #include "log.h"
 #include "nodes.h"
 #include "options.h"
+#include "query.h"
 #include "port.h"
 #include "state.h"
 #include "types.h"
@@ -72,14 +73,8 @@ get_float(const LilvNode* node, float fallback)
 static GtkWidget*
 new_box(gboolean horizontal, gint spacing)
 {
-#if GTK_MAJOR_VERSION == 3
-  return gtk_box_new(horizontal ? GTK_ORIENTATION_HORIZONTAL
-                                : GTK_ORIENTATION_VERTICAL,
-                     spacing);
-#else
   return (horizontal ? gtk_hbox_new(FALSE, spacing)
                      : gtk_vbox_new(FALSE, spacing));
-#endif
 }
 
 static GtkWidget*
@@ -109,7 +104,7 @@ on_window_destroy(GtkWidget* ZIX_UNUSED(widget), gpointer ZIX_UNUSED(data))
 }
 
 int
-jalv_frontend_init(int* argc, char*** argv, JalvOptions* opts)
+jalv_frontend_init(JalvFrontendArgs* const args, JalvOptions* const opts)
 {
   GOptionEntry entries[] = {
     {"load",
@@ -168,6 +163,7 @@ jalv_frontend_init(int* argc, char*** argv, JalvOptions* opts)
      &opts->generic_ui,
      "Use Jalv generic UI and not the plugin UI",
      NULL},
+#if 0
     {"buffer-size",
      'b',
      0,
@@ -175,6 +171,7 @@ jalv_frontend_init(int* argc, char*** argv, JalvOptions* opts)
      &opts->buffer_size,
      "Buffer size for plugin <=> UI communication",
      "SIZE"},
+#endif
     {"update-frequency",
      'r',
      0,
@@ -220,8 +217,8 @@ jalv_frontend_init(int* argc, char*** argv, JalvOptions* opts)
     {0, 0, 0, G_OPTION_ARG_NONE, 0, 0, 0}};
   GError*   error = NULL;
   const int err =
-    gtk_init_with_args(argc,
-                       argv,
+    gtk_init_with_args(args->argc,
+                       args->argv,
                        "PLUGIN_URI - Run an LV2 plugin as a Jack application",
                        entries,
                        NULL,
@@ -230,6 +227,9 @@ jalv_frontend_init(int* argc, char*** argv, JalvOptions* opts)
   if (!err) {
     fprintf(stderr, "%s\n", error->message);
   }
+
+  --*args->argc;
+  ++*args->argv;
 
   return !err;
 }
@@ -610,20 +610,21 @@ differ_enough(float a, float b)
 static void
 set_float_control(const ControlID* control, float value)
 {
-  if (control->value_type == control->forge->Int) {
+  const LV2_Atom_Forge* const forge = &s_jalv->forge;
+  if (control->value_type == forge->Int) {
     const int32_t ival = lrintf(value);
-    set_control(control, sizeof(ival), control->forge->Int, &ival);
-  } else if (control->value_type == control->forge->Long) {
+    set_control(control, sizeof(ival), forge->Int, &ival);
+  } else if (control->value_type == forge->Long) {
     const int64_t lval = lrintf(value);
-    set_control(control, sizeof(lval), control->forge->Long, &lval);
-  } else if (control->value_type == control->forge->Float) {
-    set_control(control, sizeof(value), control->forge->Float, &value);
-  } else if (control->value_type == control->forge->Double) {
+    set_control(control, sizeof(lval), forge->Long, &lval);
+  } else if (control->value_type == forge->Float) {
+    set_control(control, sizeof(value), forge->Float, &value);
+  } else if (control->value_type == forge->Double) {
     const double dval = value;
-    set_control(control, sizeof(dval), control->forge->Double, &dval);
-  } else if (control->value_type == control->forge->Bool) {
+    set_control(control, sizeof(dval), forge->Double, &dval);
+  } else if (control->value_type == forge->Bool) {
     const int32_t ival = value;
-    set_control(control, sizeof(ival), control->forge->Bool, &ival);
+    set_control(control, sizeof(ival), forge->Bool, &ival);
   }
 
   Controller* controller = (Controller*)control->widget;
@@ -799,11 +800,11 @@ property_changed(Jalv* jalv, LV2_URID key, const LV2_Atom* value)
 }
 
 void
-jalv_ui_port_event(Jalv*       jalv,
-                   uint32_t    port_index,
-                   uint32_t    buffer_size,
-                   uint32_t    protocol,
-                   const void* buffer)
+jalv_frontend_port_event(Jalv*       jalv,
+                         uint32_t    port_index,
+                         uint32_t    buffer_size,
+                         uint32_t    protocol,
+                         const void* buffer)
 {
   if (jalv->ui_instance) {
     suil_instance_port_event(
@@ -811,17 +812,13 @@ jalv_ui_port_event(Jalv*       jalv,
     return;
   }
 
-  if (protocol == 0 && (Controller*)jalv->ports[port_index].widget) {
-    control_changed(jalv,
-                    (Controller*)jalv->ports[port_index].widget,
-                    buffer_size,
-                    jalv->forge.Float,
-                    buffer);
-    return;
-  }
-
   if (protocol == 0) {
-    return; // No widget (probably notOnGUI)
+    Controller* const controller = (Controller*)jalv->ports[port_index].widget;
+    if (controller) {
+      control_changed(jalv, controller, buffer_size, jalv->forge.Float, buffer);
+    }
+
+    return;
   }
 
   if (protocol != jalv->urids.atom_eventTransfer) {
@@ -842,8 +839,7 @@ jalv_ui_port_event(Jalv*       jalv,
     } else if (obj->body.otype == jalv->urids.patch_Put) {
       const LV2_Atom_Object* body = NULL;
       if (!patch_put_get(jalv, obj, &body)) {
-        LV2_ATOM_OBJECT_FOREACH(body, prop)
-        {
+        LV2_ATOM_OBJECT_FOREACH (body, prop) {
           property_changed(jalv, prop->key, &prop->value);
         }
       }
@@ -923,17 +919,17 @@ toggle_changed(GtkToggleButton* button, gpointer data)
 static void
 string_changed(GtkEntry* widget, gpointer data)
 {
-  ControlID*  control = (ControlID*)data;
-  const char* string  = gtk_entry_get_text(widget);
+  const ControlID* control = (const ControlID*)data;
+  const char*      string  = gtk_entry_get_text(widget);
 
-  set_control(control, strlen(string) + 1, control->forge->String, string);
+  set_control(control, strlen(string) + 1, s_jalv->forge.String, string);
 }
 
 static void
 file_changed(GtkFileChooserButton* widget, gpointer data)
 {
-  ControlID*  control = (ControlID*)data;
-  const char* filename =
+  const ControlID* control = (const ControlID*)data;
+  const char*      filename =
     gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(widget));
 
   set_control(control, strlen(filename) + 1, s_jalv->forge.Path, filename);
@@ -1244,7 +1240,7 @@ build_control_widget(Jalv* jalv, GtkWidget* window)
 
     record->widget = controller;
     if (record->type == PORT) {
-      jalv->ports[record->index].widget = controller;
+      jalv->ports[record->id.index].widget = controller;
     }
     if (controller) {
       // Add row to table for this controller
@@ -1338,37 +1334,21 @@ build_menu(Jalv* jalv, GtkWidget* window, GtkWidget* vbox)
 }
 
 bool
-jalv_frontend_discover(Jalv* ZIX_UNUSED(jalv))
+jalv_frontend_discover(const Jalv* ZIX_UNUSED(jalv))
 {
   return TRUE;
 }
 
 float
-jalv_frontend_refresh_rate(Jalv* ZIX_UNUSED(jalv))
+jalv_frontend_refresh_rate(const Jalv* ZIX_UNUSED(jalv))
 {
-#if GTK_MAJOR_VERSION == 2
   return 30.0f;
-#else
-  GdkDisplay* const display = gdk_display_get_default();
-  GdkMonitor* const monitor = gdk_display_get_primary_monitor(display);
-
-  const float rate = (float)gdk_monitor_get_refresh_rate(monitor);
-
-  return rate < 30.0f ? 30.0f : rate;
-#endif
 }
 
 float
-jalv_frontend_scale_factor(Jalv* ZIX_UNUSED(jalv))
+jalv_frontend_scale_factor(const Jalv* ZIX_UNUSED(jalv))
 {
-#if GTK_MAJOR_VERSION == 2
   return 1.0f;
-#else
-  GdkDisplay* const display = gdk_display_get_default();
-  GdkMonitor* const monitor = gdk_display_get_primary_monitor(display);
-
-  return (float)gdk_monitor_get_scale_factor(monitor);
-#endif
 }
 
 static void
@@ -1498,7 +1478,103 @@ jalv_frontend_open(Jalv* jalv)
 
   set_window_title(jalv);
 
-  GtkWidget* vbox = new_box(false, 0);
+  GtkWidget* vbox = gtk_vbox_new(FALSE, 0);
+
+  gtk_window_set_role(GTK_WINDOW(window), "plugin_ui");
+  gtk_container_add(GTK_CONTAINER(window), vbox);
+
+  if (!jalv->opts.no_menu) {
+    build_menu(jalv, window, vbox);
+  }
+
+#if 0
+  // Create and show a box to contain the plugin UI
+  GtkWidget* ui_box = gtk_event_box_new();
+  gtk_widget_set_halign(ui_box, GTK_ALIGN_FILL);
+  gtk_widget_set_hexpand(ui_box, TRUE);
+  gtk_widget_set_valign(ui_box, GTK_ALIGN_FILL);
+  gtk_widget_set_vexpand(ui_box, TRUE);
+  gtk_box_pack_start(GTK_BOX(vbox), ui_box, TRUE, TRUE, 0);
+  gtk_widget_show(ui_box);
+  gtk_widget_show(vbox);
+#else
+  // Create/show alignment to contain UI (whether custom or generic)
+  GtkWidget* alignment = gtk_alignment_new(0.5, 0.5, 1.0, 1.0);
+  gtk_box_pack_start(GTK_BOX(vbox), alignment, TRUE, TRUE, 0);
+  gtk_widget_show(alignment);
+#endif
+
+  // Attempt to instantiate custom UI if necessary
+  if (jalv->ui && !jalv->opts.generic_ui) {
+    jalv_ui_instantiate(jalv, jalv_frontend_ui_type(), alignment);
+  }
+
+  jalv->features.request_value.request = on_request_value;
+
+  if (jalv->ui_instance) {
+    GtkWidget* widget = (GtkWidget*)suil_instance_get_widget(jalv->ui_instance);
+
+    gtk_container_add(GTK_CONTAINER(alignment), widget);
+    gtk_window_set_resizable(GTK_WINDOW(window),
+                             jalv_ui_is_resizable(jalv->world, jalv->ui));
+    gtk_widget_show_all(vbox);
+    gtk_widget_grab_focus(widget);
+  } else {
+    GtkWidget* controls   = build_control_widget(jalv, window);
+    GtkWidget* scroll_win = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(scroll_win),
+                                          controls);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_win),
+                                   GTK_POLICY_AUTOMATIC,
+                                   GTK_POLICY_AUTOMATIC);
+    gtk_container_add(GTK_CONTAINER(alignment), scroll_win);
+    gtk_widget_show_all(vbox);
+
+    GtkRequisition controls_size = {0, 0};
+    GtkRequisition box_size      = {0, 0};
+    size_request(GTK_WIDGET(controls), &controls_size);
+    size_request(GTK_WIDGET(vbox), &box_size);
+
+    gtk_window_set_default_size(
+      GTK_WINDOW(window),
+      MAX(MAX(box_size.width, controls_size.width) + 24, 640),
+      box_size.height + controls_size.height);
+  }
+
+  jalv_init_ui(jalv);
+
+  const float update_interval_ms = 1000.0f / jalv->settings.ui_update_hz;
+  g_timeout_add((unsigned)update_interval_ms, (GSourceFunc)jalv_update, jalv);
+
+  gtk_window_present(GTK_WINDOW(window));
+
+  gtk_main();
+  suil_instance_free(jalv->ui_instance);
+
+  for (unsigned i = 0U; i < jalv->controls.n_controls; ++i) {
+    free(jalv->controls.controls[i]->widget); // free Controller
+  }
+
+  jalv->ui_instance = NULL;
+  zix_sem_post(&jalv->done);
+  return 0;
+}
+
+#if 0
+int
+jalv_frontend_open2(Jalv* jalv)
+{
+  GtkWidget* window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  jalv->window      = window;
+
+  s_jalv = jalv;
+
+  g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), jalv);
+
+  set_window_title(jalv);
+
+  GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
   gtk_window_set_role(GTK_WINDOW(window), "plugin_ui");
   gtk_container_add(GTK_CONTAINER(window), vbox);
 
@@ -1559,6 +1635,7 @@ jalv_frontend_open(Jalv* jalv)
   zix_sem_post(&jalv->done);
   return 0;
 }
+#endif
 
 int
 jalv_frontend_close(Jalv* ZIX_UNUSED(jalv))
