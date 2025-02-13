@@ -163,15 +163,13 @@ jalv_frontend_init(JalvFrontendArgs* const args, JalvOptions* const opts)
      &opts->generic_ui,
      "Use Jalv generic UI and not the plugin UI",
      NULL},
-#if 0
     {"buffer-size",
      'b',
      0,
      G_OPTION_ARG_INT,
-     &opts->buffer_size,
+     &opts->ring_size,
      "Buffer size for plugin <=> UI communication",
      "SIZE"},
-#endif
     {"update-frequency",
      'r',
      0,
@@ -1487,22 +1485,10 @@ jalv_frontend_open(Jalv* jalv)
     build_menu(jalv, window, vbox);
   }
 
-#if 0
-  // Create and show a box to contain the plugin UI
-  GtkWidget* ui_box = gtk_event_box_new();
-  gtk_widget_set_halign(ui_box, GTK_ALIGN_FILL);
-  gtk_widget_set_hexpand(ui_box, TRUE);
-  gtk_widget_set_valign(ui_box, GTK_ALIGN_FILL);
-  gtk_widget_set_vexpand(ui_box, TRUE);
-  gtk_box_pack_start(GTK_BOX(vbox), ui_box, TRUE, TRUE, 0);
-  gtk_widget_show(ui_box);
-  gtk_widget_show(vbox);
-#else
   // Create/show alignment to contain UI (whether custom or generic)
   GtkWidget* alignment = gtk_alignment_new(0.5, 0.5, 1.0, 1.0);
   gtk_box_pack_start(GTK_BOX(vbox), alignment, TRUE, TRUE, 0);
   gtk_widget_show(alignment);
-#endif
 
   // Attempt to instantiate custom UI if necessary
   if (jalv->ui && !jalv->opts.generic_ui) {
@@ -1559,83 +1545,6 @@ jalv_frontend_open(Jalv* jalv)
   zix_sem_post(&jalv->done);
   return 0;
 }
-
-#if 0
-int
-jalv_frontend_open2(Jalv* jalv)
-{
-  GtkWidget* window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-  jalv->window      = window;
-
-  s_jalv = jalv;
-
-  g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), jalv);
-
-  set_window_title(jalv);
-
-  GtkWidget* vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-
-  gtk_window_set_role(GTK_WINDOW(window), "plugin_ui");
-  gtk_container_add(GTK_CONTAINER(window), vbox);
-
-  if (!jalv->opts.no_menu) {
-    build_menu(jalv, window, vbox);
-  }
-
-  // Create/show alignment to contain UI (whether custom or generic)
-  GtkWidget* alignment = gtk_alignment_new(0.5, 0.5, 1.0, 1.0);
-  gtk_box_pack_start(GTK_BOX(vbox), alignment, TRUE, TRUE, 0);
-  gtk_widget_show(alignment);
-
-  // Attempt to instantiate custom UI if necessary
-  if (jalv->ui && !jalv->opts.generic_ui) {
-    jalv_ui_instantiate(jalv, jalv_frontend_ui_type(), alignment);
-  }
-
-  jalv->features.request_value.request = on_request_value;
-
-  if (jalv->ui_instance) {
-    GtkWidget* widget = (GtkWidget*)suil_instance_get_widget(jalv->ui_instance);
-
-    gtk_container_add(GTK_CONTAINER(alignment), widget);
-    gtk_window_set_resizable(GTK_WINDOW(window), jalv_ui_is_resizable(jalv));
-    gtk_widget_show_all(vbox);
-    gtk_widget_grab_focus(widget);
-  } else {
-    GtkWidget* controls   = build_control_widget(jalv, window);
-    GtkWidget* scroll_win = gtk_scrolled_window_new(NULL, NULL);
-    gtk_scrolled_window_add_with_viewport(GTK_SCROLLED_WINDOW(scroll_win),
-                                          controls);
-    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll_win),
-                                   GTK_POLICY_AUTOMATIC,
-                                   GTK_POLICY_AUTOMATIC);
-    gtk_container_add(GTK_CONTAINER(alignment), scroll_win);
-    gtk_widget_show_all(vbox);
-
-    GtkRequisition controls_size = {0, 0};
-    GtkRequisition box_size      = {0, 0};
-    size_request(GTK_WIDGET(controls), &controls_size);
-    size_request(GTK_WIDGET(vbox), &box_size);
-
-    gtk_window_set_default_size(
-      GTK_WINDOW(window),
-      MAX(MAX(box_size.width, controls_size.width) + 24, 640),
-      box_size.height + controls_size.height);
-  }
-
-  jalv_init_ui(jalv);
-
-  g_timeout_add(1000 / jalv->ui_update_hz, (GSourceFunc)jalv_update, jalv);
-
-  gtk_window_present(GTK_WINDOW(window));
-
-  gtk_main();
-  suil_instance_free(jalv->ui_instance);
-  jalv->ui_instance = NULL;
-  zix_sem_post(&jalv->done);
-  return 0;
-}
-#endif
 
 int
 jalv_frontend_close(Jalv* ZIX_UNUSED(jalv))
