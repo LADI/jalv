@@ -13,19 +13,16 @@
 #include "types.h"
 #include "urids.h"
 
-#include "lilv/lilv.h"
-#include "lv2/atom/atom.h"
-#include "lv2/atom/forge.h"
-#include "lv2/atom/util.h"
-#include "lv2/core/attributes.h"
-#include "lv2/core/lv2.h"
-#include "lv2/ui/ui.h"
-#include "lv2/urid/urid.h"
-#include "suil/suil.h"
-#include "zix/attributes.h"
-#include "zix/sem.h"
-
-LV2_DISABLE_DEPRECATION_WARNINGS
+#include <lilv/lilv.h>
+#include <lv2/atom/atom.h>
+#include <lv2/atom/forge.h>
+#include <lv2/atom/util.h>
+#include <lv2/core/lv2.h>
+#include <lv2/ui/ui.h>
+#include <lv2/urid/urid.h>
+#include <suil/suil.h>
+#include <zix/attributes.h>
+#include <zix/sem.h>
 
 #include <gdk/gdk.h>
 #include <glib-object.h>
@@ -1553,5 +1550,3 @@ jalv_frontend_close(Jalv* ZIX_UNUSED(jalv))
   s_jalv = NULL;
   return 0;
 }
-
-LV2_RESTORE_WARNINGS
