@@ -30,7 +30,7 @@ extern "C" {
 #endif
 
 /** opaque handle to memory pool */
-typedef struct { /** fake */ int unused; } * lv2_rtsafe_memory_pool_handle;
+typedef struct lv2_rtsafe_memory_pool_handle_tag { /** fake */ int unused; } * lv2_rtsafe_memory_pool_handle;
 
 /** max size of memory pool name, in chars, including terminating zero char */
 #define LV2_RTSAFE_MEMORY_POOL_NAME_MAX 128
