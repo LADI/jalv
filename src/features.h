@@ -16,6 +16,8 @@
 #include <lv2/ui/ui.h>
 #include <lv2/worker/worker.h>
 
+#include "lv2_rtmempool.h"
+
 // LV2 feature support
 JALV_BEGIN_DECLS
 
@@ -37,6 +39,8 @@ typedef struct {
   LV2UI_Request_Value        request_value;
   LV2_Feature                request_value_feature;
   LV2_Extension_Data_Feature ext_data;
+  struct lv2_rtsafe_memory_pool_provider rtmempool_provider;
+  LV2_Feature                rtmempool_feature;
 } JalvFeatures;
 
 /// Set LV2 options feature for passing to plugin after settings are determined

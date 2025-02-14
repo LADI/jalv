@@ -1,4 +1,5 @@
 // Copyright 2007-2024 David Robillard <d@drobilla.net>
+// Copyright 2024-2025 Nedko Arnaudov
 // SPDX-License-Identifier: ISC
 
 #include "jalv.h"
@@ -55,6 +56,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "rtmempool.h"
 
 /**
    Size factor for UI ring buffers.
@@ -633,6 +636,12 @@ jalv_init_features(Jalv* const jalv)
   init_feature(&jalv->features.request_value_feature,
                LV2_UI__requestValue,
                &jalv->features.request_value);
+
+  /* initialize rtsafe mempool host feature */
+  rtmempool_allocator_init(&jalv->features.rtmempool_provider);
+  init_feature(&jalv->features.rtmempool_feature,
+	       LV2_RTSAFE_MEMORY_POOL_URI,
+	       &jalv->features.rtmempool_provider);
 }
 
 static void
@@ -875,6 +884,7 @@ jalv_open(Jalv* const jalv, int* argc, char*** argv)
                                          &jalv->features.sched_feature,
                                          &jalv->features.log_feature,
                                          &jalv->features.options_feature,
+                                         &jalv->features.rtmempool_feature,
                                          &static_features[0],
                                          &static_features[1],
                                          &static_features[2],

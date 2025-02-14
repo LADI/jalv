@@ -15,6 +15,8 @@
 #include <lv2/ui/ui.h>
 #include <lv2/worker/worker.h>
 
+#include "lv2-miditype.h"
+
 #include <stddef.h>
 
 void
@@ -28,6 +30,7 @@ jalv_init_nodes(LilvWorld* const world, JalvNodes* const nodes)
   nodes->atom_Path               = MAP_NODE(LV2_ATOM__Path);
   nodes->atom_Sequence           = MAP_NODE(LV2_ATOM__Sequence);
   nodes->lv2_AudioPort           = MAP_NODE(LV2_CORE__AudioPort);
+  nodes->lv2_LLMidiPort          = MAP_NODE(LV2_LLMIDI_URI);
   nodes->lv2_CVPort              = MAP_NODE(LV2_CORE__CVPort);
   nodes->lv2_ControlPort         = MAP_NODE(LV2_CORE__ControlPort);
   nodes->lv2_InputPort           = MAP_NODE(LV2_CORE__InputPort);

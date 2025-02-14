@@ -1,6 +1,8 @@
 ladi-jalv unstable; urgency=medium
 
   * Bring Gtk2 interface back
+  * Add support for ll-plugins-style midi input ports
+  * Add Support for rtmempool extension
 
 -- Nedko Arnaudov
 

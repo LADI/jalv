@@ -1,0 +1,16 @@
+version = 1
+SPDX-PackageName = "jalv"
+SPDX-PackageSupplier = "Nedko Arnaudov"
+SPDX-PackageDownloadLocation = "https://gitea.ladish.org/LADI/jalv"
+
+[[annotations]]
+path = [".clang**", ".clant.json", ".gitignore", ".includes.imp", ".suppress.cppcheck", "AUTHORS", "NEWS", "jalv.desktop.in", "jalv.ttl"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2010-2022 David Robillard <d@drobilla.net>"
+SPDX-License-Identifier = "0BSD OR ISC"
+
+[[annotations]]
+path = ["INSTALL.md", "README.md", "doc/**.1"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2011-2020 David Robillard <d@drobilla.net>"
+SPDX-License-Identifier = "ISC"

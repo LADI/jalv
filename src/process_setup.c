@@ -103,6 +103,13 @@ jalv_process_activate(JalvProcess* const        proc,
       if (port->flow == FLOW_INPUT) {
         proc->process_msg_size = MAX(proc->process_msg_size, port->buf_size);
       }
+    } else if (port->type == TYPE_LLMIDI && port->flow == FLOW_INPUT) {
+	free(port->llmidi.data);
+	port->llmidi.capacity = 16*1024;
+	port->llmidi.data = calloc(1, port->llmidi.capacity);
+	lilv_instance_connect_port(
+	    proc->instance, i, &port->llmidi);
+	fprintf(stderr, "Allocated buffer %p for llmidi port %p, llmidi=%p\n", port->llmidi.data, port, &port->llmidi);
     }
   }
 
@@ -123,7 +130,8 @@ jalv_process_deactivate(JalvProcess* const proc)
 
   for (uint32_t i = 0U; i < proc->num_ports; ++i) {
     lv2_evbuf_free(proc->ports[i].evbuf);
-    lilv_instance_connect_port(proc->instance, i, NULL);
+    if (proc->instance)
+      lilv_instance_connect_port(proc->instance, i, NULL);
     proc->ports[i].evbuf = NULL;
   }
 }
@@ -167,6 +175,8 @@ jalv_process_port_init(JalvProcessPort* const  port,
   } else if (lilv_port_is_a(lilv_plugin, lilv_port, nodes->lv2_CVPort)) {
     port->type = TYPE_CV;
 #endif
+  } else if (lilv_port_is_a(lilv_plugin, lilv_port, nodes->lv2_LLMidiPort)) {
+    port->type = TYPE_LLMIDI;
   } else if (lilv_port_is_a(lilv_plugin, lilv_port, nodes->atom_AtomPort)) {
     port->type = TYPE_EVENT;
   } else if (!optional) {

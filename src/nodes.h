@@ -19,7 +19,7 @@ typedef struct {
   LilvNode* atom_Path;
   LilvNode* atom_Sequence;
   LilvNode* lv2_AudioPort;
-  LilvNode* lv2_OldMidiPort;
+  LilvNode* lv2_LLMidiPort;
   LilvNode* lv2_CVPort;
   LilvNode* lv2_ControlPort;
   LilvNode* lv2_InputPort;

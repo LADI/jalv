@@ -451,6 +451,7 @@ common_sources = files(
   'src/symap.c',
   'src/urids.c',
   'src/worker.c',
+  'src/rtmempool.c',
 )
 
 sources = backend_sources + common_sources

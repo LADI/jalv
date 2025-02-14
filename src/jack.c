@@ -1,4 +1,5 @@
 // Copyright 2007-2024 David Robillard <d@drobilla.net>
+// Copyright 2025 Nedko Arnaudov
 // SPDX-License-Identifier: ISC
 
 #include "backend.h"
@@ -173,6 +174,42 @@ process_cb(jack_nframes_t nframes, void* data)
       // Connect plugin port directly to Jack port buffer
       lilv_instance_connect_port(
         proc->instance, p, jack_port_get_buffer(port->sys_port, nframes));
+    } else if (port->sys_port &&
+	       port->type == TYPE_LLMIDI &&
+	       port->flow == FLOW_INPUT &&
+	       port->llmidi.data != NULL) {
+      lilv_instance_connect_port(proc->instance, p, &port->llmidi);
+      // Write Jack MIDI input
+      void* buf = jack_port_get_buffer(port->sys_port, nframes);
+      unsigned char * midi_data = port->llmidi.data;
+      port->llmidi.size = 0;
+      port->llmidi.event_count = 0;
+      for (uint32_t i = 0; i < jack_midi_get_event_count(buf); ++i) {
+	jack_midi_event_t ev;
+	jack_midi_event_get(&ev, buf, i);
+
+	if (port->llmidi.size + ev.size > port->llmidi.capacity)
+	    break;		/* no space for more midi events */
+
+	/* write LV2 MIDI event */
+	*((double*)midi_data) = ev.time;
+	midi_data += sizeof(double);
+	*((size_t*)midi_data) = ev.size;
+	midi_data += sizeof(size_t);
+	memcpy(midi_data, ev.buffer, ev.size);
+
+#if 0
+	/* normalise note events if needed */
+	if ((ev.size == 3) && ((midi_data[0] & 0xF0) == 0x90) &&
+	    (midi_data[2] == 0))
+	{
+	    midi_data[0] = 0x80 | (midi_data[0] & 0x0F);
+	}
+#endif
+	midi_data += ev.size;
+	port->llmidi.size += ev.size;
+	port->llmidi.event_count++;
+      }
     } else if (port->type == TYPE_EVENT && port->flow == FLOW_INPUT) {
       lv2_evbuf_reset(port->evbuf, true);
       LV2_Evbuf_Iterator iter = lv2_evbuf_begin(port->evbuf);
@@ -443,6 +480,10 @@ jalv_backend_activate_port(JalvBackend* const backend,
     }
     break;
 #endif
+  case TYPE_LLMIDI:
+    port->sys_port = jack_port_register(
+      client, port->symbol, JACK_DEFAULT_MIDI_TYPE, jack_flags, 0);
+    break;
   case TYPE_EVENT:
     if (port->supports_midi) {
       port->sys_port = jack_port_register(

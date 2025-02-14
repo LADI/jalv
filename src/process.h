@@ -19,6 +19,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "lv2-miditype.h"
+
 // Code and data used in the realtime process thread
 JALV_BEGIN_DECLS
 
@@ -30,6 +32,7 @@ typedef struct {
   char*      symbol;          ///< Port symbol (stable/unique C-like identifier)
   char*      label;           ///< Human-readable label
   LV2_Evbuf* evbuf;           ///< Sequence port event buffer
+  LV2_LLMIDI llmidi;          ///> ll-plugins midi buffer
   uint32_t   buf_size;        ///< Custom buffer size, or 0
   bool       reports_latency; ///< Whether control port reports latency
   bool       is_primary;      ///< True for main control/response channel

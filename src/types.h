@@ -29,6 +29,7 @@ typedef enum {
   TYPE_UNKNOWN,
   TYPE_CONTROL,
   TYPE_AUDIO,
+  TYPE_LLMIDI,
   TYPE_EVENT,
   TYPE_CV
 } PortType;
