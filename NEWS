@@ -3,6 +3,7 @@ ladi-jalv unstable; urgency=medium
   * Bring Gtk2 interface back
   * Add support for ll-plugins-style midi input ports
   * Add Support for rtmempool extension
+  * Run SPDX test as part of test suite
 
 -- Nedko Arnaudov
 

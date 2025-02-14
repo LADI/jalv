@@ -66,17 +66,6 @@ if get_option('lint')
     endif
   endif
 
-  # Check licensing metadata
-  reuse = find_program('reuse', required: false)
-  if reuse.found()
-    test(
-      'REUSE',
-      reuse,
-      args: ['--root', jalv_src_root, 'lint'],
-      suite: 'data',
-    )
-  endif
-
   # Check code formatting
   clang_format = find_program('clang-format', required: false)
   if clang_format.found()
@@ -102,3 +91,14 @@ test(
     dependencies: [zix_dep],
   ),
 )
+
+# Check licensing metadata
+reuse = find_program('reuse', required: false)
+if reuse.found()
+  test(
+    'REUSE',
+    reuse,
+    args: ['--root', jalv_src_root, 'lint'],
+    suite: 'data',
+  )
+endif
