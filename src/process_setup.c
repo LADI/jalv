@@ -109,7 +109,7 @@ jalv_process_activate(JalvProcess* const        proc,
 	port->llmidi.data = calloc(1, port->llmidi.capacity);
 	lilv_instance_connect_port(
 	    proc->instance, i, &port->llmidi);
-	fprintf(stderr, "Allocated buffer %p for llmidi port %p, llmidi=%p\n", port->llmidi.data, port, &port->llmidi);
+//	fprintf(stderr, "Allocated buffer %p for llmidi port %p, llmidi=%p\n", port->llmidi.data, port, &port->llmidi);
     }
   }
 
